@@ -1,4 +1,4 @@
-"""Zero dependency router implementation with path params
+"""Zero dependency router implementation with path param support.
 
 Heavily inspired by go 1.22+ net/http's ServeMux
 """
@@ -306,13 +306,13 @@ def main() -> None:
     ]
 
     for path, method, expected_handler, expected_middleware in tests:
-        print(method, path, file=sys.stderr, flush=True)
+        print(method, path, file=sys.stderr, flush=True, end=" ")
 
         start = time.perf_counter()
         handler, middleware, params = find_handler(path, method, tree)
         end = time.perf_counter()
 
-        print(f"took {end - start:.2E} seconds", file=sys.stderr, flush=True)
+        print(f"lookup took {end - start:.2E} seconds", file=sys.stderr, flush=True)
 
         assert handler is expected_handler, f"{handler=} is {expected_handler=}"
         assert middleware == expected_middleware, (
