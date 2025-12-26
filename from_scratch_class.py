@@ -7,12 +7,41 @@ import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from enum import Enum
 from functools import reduce
-from http import HTTPMethod
 
 # --- IMPLEMENTATION -----------------------------------------------------------
 type Handler = Callable[[dict[str, str]], None]  # placeholder for ASGI/RSGI app
 type Middleware[T] = Callable[[T], T]
+
+
+class LeafKey(Enum):
+    """Valid keys for leaf nodes: HTTP methods or websocket.
+
+    Methods from the following RFCs are all observed:
+
+        * RFC 9110: HTTP Semantics, obsoletes 7231, which obsoleted 2616
+        * RFC 5789: PATCH Method for HTTP
+
+    ANY_HTTP represents any http method
+    WEBSOCKET matches a websocket connection
+    """
+
+    CONNECT = "CONNECT"  # Establish a connection to the server.
+    DELETE = "DELETE"  # Remove the target.
+    GET = "GET"  # Retrieve the target.
+    HEAD = "HEAD"  # Same as GET, but only retrieve status line and header section.
+    OPTIONS = "OPTIONS"  # Describe the communication options for the target.
+    PATCH = "PATCH"  # Apply partial modifications to a target.
+    POST = "POST"  # Perform target-specific processing with the request payload.
+    PUT = "PUT"  # Replace the target with the request payload.
+    TRACE = "TRACE"  # Perform a message loop-back test along the path to the target.
+
+    ANY_HTTP = "ANY_HTTP"  # Any HTTP method.
+    WEBSOCKET = "WEBSOCKET"  # Websocket connection. (The HTTP connection is upgraded before it's passed to the RSGI app.)
+
+    def __repr__(self) -> str:
+        return str(self.value)
 
 
 @dataclass
@@ -22,7 +51,7 @@ class Node[T]:
     not_found_handler: T
     method_not_allowed_handler: T
     handler: T | None = field(default=None)
-    children: dict[str | HTTPMethod | None, Node[T]] = field(default_factory=dict)
+    children: dict[str | LeafKey, Node[T]] = field(default_factory=dict)
     wildcard: WildCardNode[T] | None = field(default=None)
     catchall: CatchAllNode[T] | None = field(default=None)
     middleware: list[Middleware[T]] = field(default_factory=list)
@@ -42,7 +71,7 @@ class CatchAllNode[T]:
 
 def find_handler[T](
     path: str,
-    method: HTTPMethod,
+    method: LeafKey,
     tree: Node[T],
 ) -> tuple[T, list[Middleware[T]], dict[str, str]]:
     """Traverses the tree to find the best match handler.
@@ -76,7 +105,7 @@ def find_handler[T](
 
     leaf = current.children.get(method)
     if leaf is None:
-        leaf = current.children.get(None)  # fallback to any method handler
+        leaf = current.children.get(LeafKey.ANY_HTTP)  # fallback to any method handler
         if leaf is None:
             return current.method_not_allowed_handler, [], params
 
@@ -150,7 +179,7 @@ tree: Node[Handler] = Node(
     children={
         "admin": Node(
             children={
-                HTTPMethod.GET: Node(
+                LeafKey.GET: Node(
                     handler=admin_home_handler,
                     not_found_handler=admin_not_found_handler,
                     method_not_allowed_handler=method_not_allowed_handler,
@@ -162,7 +191,7 @@ tree: Node[Handler] = Node(
                             children={
                                 "rename": Node(
                                     children={
-                                        HTTPMethod.POST: Node(
+                                        LeafKey.POST: Node(
                                             handler=admin_user_rename_handler,
                                             not_found_handler=admin_not_found_handler,
                                             method_not_allowed_handler=method_not_allowed_handler,
@@ -177,7 +206,7 @@ tree: Node[Handler] = Node(
                                         name="tx",
                                         child=Node(
                                             children={
-                                                HTTPMethod.GET: Node(
+                                                LeafKey.GET: Node(
                                                     handler=admin_user_transaction_view_handler,
                                                     not_found_handler=admin_not_found_handler,
                                                     method_not_allowed_handler=method_not_allowed_handler,
@@ -209,7 +238,7 @@ tree: Node[Handler] = Node(
                 name="path",
                 child=Node(
                     children={
-                        HTTPMethod.GET: Node(
+                        LeafKey.GET: Node(
                             handler=static_handler,
                             not_found_handler=not_found_handler,
                             method_not_allowed_handler=static_method_not_allowed_handler,
@@ -224,7 +253,7 @@ tree: Node[Handler] = Node(
         ),
         "": Node(  # "" is trailing slash (because result of "/foo/".split("/") == ["foo", ""])
             children={
-                None: Node(  # None is any method
+                LeafKey.ANY_HTTP: Node(  # None is any method
                     handler=home_handler,
                     not_found_handler=not_found_handler,
                     method_not_allowed_handler=method_not_allowed_handler,
@@ -242,38 +271,38 @@ tree: Node[Handler] = Node(
 def main() -> None:
     tests = [
         # simple, any method
-        ("/", HTTPMethod.PATCH, home_handler, []),
+        ("/", LeafKey.PATCH, home_handler, []),
         # simple, with method
-        ("/admin", HTTPMethod.GET, admin_home_handler, [admin_middleware]),
+        ("/admin", LeafKey.GET, admin_home_handler, [admin_middleware]),
         # 404
-        ("/some/nonexistent/route", HTTPMethod.GET, not_found_handler, []),
+        ("/some/nonexistent/route", LeafKey.GET, not_found_handler, []),
         # 404 on trailing slash
-        ("/admin/", HTTPMethod.GET, admin_not_found_handler, []),
+        ("/admin/", LeafKey.GET, admin_not_found_handler, []),
         # 405
-        ("/admin", HTTPMethod.DELETE, method_not_allowed_handler, []),
+        ("/admin", LeafKey.DELETE, method_not_allowed_handler, []),
         # 405
         (
             "/static/bleugh.txt",
-            HTTPMethod.OPTIONS,
+            LeafKey.OPTIONS,
             static_method_not_allowed_handler,
             [],
         ),
         # wildcard param
         (
             "/admin/user/1/rename",
-            HTTPMethod.POST,
+            LeafKey.POST,
             admin_user_rename_handler,
             [admin_middleware, admin_user_middleware, admin_user_rename_middleware],
         ),
         # multiple wildcard params
         (
             "/admin/user/1/transaction/2",
-            HTTPMethod.GET,
+            LeafKey.GET,
             admin_user_transaction_view_handler,
             [admin_middleware, admin_user_middleware],
         ),
         # catchall param
-        ("/static/lib/datastar.min.js", HTTPMethod.GET, static_handler, []),
+        ("/static/lib/datastar.min.js", LeafKey.GET, static_handler, []),
     ]
 
     for path, method, expected_handler, expected_middleware in tests:
