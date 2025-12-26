@@ -7,10 +7,12 @@ import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import reduce
 from http import HTTPMethod
 
 # --- IMPLEMENTATION -----------------------------------------------------------
 type Handler = Callable[[dict[str, str]], None]  # placeholder for ASGI/RSGI app
+type Middleware[T] = Callable[[T], T]
 
 
 @dataclass
@@ -20,9 +22,10 @@ class Node[T]:
     not_found_handler: T
     method_not_allowed_handler: T
     handler: T | None = field(default=None)
-    children: dict[str | HTTPMethod | None, Node] = field(default_factory=dict)
-    wildcard: WildCardNode | None = field(default=None)
-    catchall: CatchAllNode | None = field(default=None)
+    children: dict[str | HTTPMethod | None, Node[T]] = field(default_factory=dict)
+    wildcard: WildCardNode[T] | None = field(default=None)
+    catchall: CatchAllNode[T] | None = field(default=None)
+    middleware: list[Middleware[T]] = field(default_factory=list)
 
 
 @dataclass
@@ -41,7 +44,7 @@ def find_handler[T](
     path: str,
     method: HTTPMethod,
     tree: Node[T],
-) -> tuple[T, dict[str, str]]:
+) -> tuple[T, list[Middleware[T]], dict[str, str]]:
     """Traverses the tree to find the best match handler.
 
     Each path segment priority is: exact match > wildcard match  > catchall match
@@ -53,9 +56,11 @@ def find_handler[T](
     current = tree
     child = None
     params = {}
+    middleware = [*current.middleware]
     for i, seg in enumerate(segments):
         child = current.children.get(seg)
         if child is not None:  # exact match
+            middleware.extend(child.middleware)
             current = child  # traverse to child
             continue
         if current.wildcard is not None:  # fallback to wildcard match
@@ -67,18 +72,19 @@ def find_handler[T](
             current = current.catchall.child  # traverse to catchall child
             break
         # no match
-        return current.not_found_handler, params
+        return current.not_found_handler, [], params
 
     leaf = current.children.get(method)
     if leaf is None:
         leaf = current.children.get(None)  # fallback to any method handler
         if leaf is None:
-            return current.method_not_allowed_handler, params
+            return current.method_not_allowed_handler, [], params
 
     if leaf.handler is None:
-        return current.not_found_handler, params
+        return current.not_found_handler, [], params
 
-    return leaf.handler, params
+    middleware.extend(leaf.middleware)
+    return leaf.handler, middleware, params
 
 
 # --- END IMPLEMENTATION -------------------------------------------------------
@@ -102,6 +108,22 @@ method_not_allowed_handler = lambda _: print("> 405")  # noqa: E731
 static_method_not_allowed_handler = lambda _: print("> static 405")  # noqa: E731
 
 
+# middleware
+def admin_middleware[T](f: T) -> T:
+    print(">> admin middleware")
+    return f
+
+
+def admin_user_middleware[T](f: T) -> T:
+    print(">> admin user middleware")
+    return f
+
+
+def admin_user_rename_middleware[T](f: T) -> T:
+    print(">> admin user rename middleware")
+    return f
+
+
 """
 handlers:
 POST    /admin/user/{id}/rename             admin_user_rename_handler
@@ -117,7 +139,13 @@ not found handlers:
 method not allowed handlers:
 <fallback>  method_not_allowed_handler
 /static     static_method_not_allowed_handler
+
+middleware:
+/admin                          admin_middleware
+/admin/user                     admin_user_middleware
+POST /admin/user/{id}/rename    admin_user_rename_middleware
 """
+# manually create the tree (we'll make nicer ways to construct this later)
 tree: Node[Handler] = Node(
     children={
         "admin": Node(
@@ -138,6 +166,7 @@ tree: Node[Handler] = Node(
                                             handler=admin_user_rename_handler,
                                             not_found_handler=admin_not_found_handler,
                                             method_not_allowed_handler=method_not_allowed_handler,
+                                            middleware=[admin_user_rename_middleware],
                                         ),
                                     },
                                     not_found_handler=admin_not_found_handler,
@@ -168,10 +197,12 @@ tree: Node[Handler] = Node(
                     ),
                     not_found_handler=admin_not_found_handler,
                     method_not_allowed_handler=method_not_allowed_handler,
+                    middleware=[admin_user_middleware],
                 ),
             },
             not_found_handler=admin_not_found_handler,
             method_not_allowed_handler=method_not_allowed_handler,
+            middleware=[admin_middleware],
         ),
         "static": Node(
             catchall=CatchAllNode(
@@ -211,41 +242,58 @@ tree: Node[Handler] = Node(
 def main() -> None:
     tests = [
         # simple, any method
-        ("/", HTTPMethod.PATCH, home_handler),
+        ("/", HTTPMethod.PATCH, home_handler, []),
         # simple, with method
-        ("/admin", HTTPMethod.GET, admin_home_handler),
+        ("/admin", HTTPMethod.GET, admin_home_handler, [admin_middleware]),
         # 404
-        ("/some/nonexistent/route", HTTPMethod.GET, not_found_handler),
+        ("/some/nonexistent/route", HTTPMethod.GET, not_found_handler, []),
         # 404 on trailing slash
-        ("/admin/", HTTPMethod.GET, admin_not_found_handler),
+        ("/admin/", HTTPMethod.GET, admin_not_found_handler, []),
         # 405
-        ("/admin", HTTPMethod.DELETE, method_not_allowed_handler),
+        ("/admin", HTTPMethod.DELETE, method_not_allowed_handler, []),
         # 405
-        ("/static/bleugh.txt", HTTPMethod.OPTIONS, static_method_not_allowed_handler),
+        (
+            "/static/bleugh.txt",
+            HTTPMethod.OPTIONS,
+            static_method_not_allowed_handler,
+            [],
+        ),
         # wildcard param
-        ("/admin/user/1/rename", HTTPMethod.POST, admin_user_rename_handler),
+        (
+            "/admin/user/1/rename",
+            HTTPMethod.POST,
+            admin_user_rename_handler,
+            [admin_middleware, admin_user_middleware, admin_user_rename_middleware],
+        ),
         # multiple wildcard params
         (
             "/admin/user/1/transaction/2",
             HTTPMethod.GET,
             admin_user_transaction_view_handler,
+            [admin_middleware, admin_user_middleware],
         ),
         # catchall param
-        ("/static/lib/datastar.min.js", HTTPMethod.GET, static_handler),
+        ("/static/lib/datastar.min.js", HTTPMethod.GET, static_handler, []),
     ]
 
-    for path, method, expected_handler in tests:
-        print(method, path)
+    for path, method, expected_handler, expected_middleware in tests:
+        print(method, path, file=sys.stderr, flush=True)
 
         start = time.perf_counter()
-        handler, params = find_handler(path, method, tree)
+        handler, middleware, params = find_handler(path, method, tree)
         end = time.perf_counter()
 
         print(f"took {end - start:.2E} seconds", file=sys.stderr, flush=True)
 
-        handler(params)
+        assert handler is expected_handler, f"{handler=} is {expected_handler=}"
+        assert middleware == expected_middleware, (
+            f"{middleware=} == {expected_middleware=}"
+        )
 
-        assert handler is expected_handler
+        # apply middleware stack
+        wrapped_handler = reduce(lambda h, m: m(h), reversed(middleware), handler)
+        # call handler
+        wrapped_handler(params)
 
 
 if __name__ == "__main__":
