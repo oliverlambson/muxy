@@ -8,7 +8,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from functools import reduce
+from functools import lru_cache, reduce
 
 # --- IMPLEMENTATION -----------------------------------------------------------
 type Handler = Callable[[dict[str, str]], None]  # placeholder for ASGI/RSGI app
@@ -44,31 +44,49 @@ class LeafKey(Enum):
         return str(self.value)
 
 
-@dataclass(slots=True)
+class FrozenDict(dict):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._hash = None
+
+    def __hash__(self):
+        if self._hash is None:
+            self._hash = hash(frozenset(self.items()))
+        return self._hash
+
+    def _immutable(self, *args, **kwargs):
+        msg = "FrozenDict is immutable"
+        raise TypeError(msg)
+
+    __setitem__ = __delitem__ = clear = pop = popitem = setdefault = update = _immutable
+
+
+@dataclass(slots=True, frozen=True)
 class Node[T]:
     """Segment-based trie node"""
 
     not_found_handler: T
     method_not_allowed_handler: T
     handler: T | None = field(default=None)
-    children: dict[str | LeafKey, Node[T]] = field(default_factory=dict)
+    children: FrozenDict[str | LeafKey, Node[T]] = field(default_factory=FrozenDict)
     wildcard: WildCardNode[T] | None = field(default=None)
     catchall: CatchAllNode[T] | None = field(default=None)
-    middleware: list[Middleware[T]] = field(default_factory=list)
+    middleware: tuple[Middleware[T], ...] = field(default_factory=tuple)
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, frozen=True)
 class WildCardNode[T]:
     name: str
     child: Node[T]
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, frozen=True)
 class CatchAllNode[T]:
     name: str
     child: Node[T]
 
 
+@lru_cache(maxsize=1024)
 def find_handler[T](
     path: str,
     method: LeafKey,
@@ -176,93 +194,109 @@ POST /admin/user/{id}/rename    admin_user_rename_middleware
 """
 # manually create the tree (we'll make nicer ways to construct this later)
 tree: Node[Handler] = Node(
-    children={
-        "admin": Node(
-            children={
-                LeafKey.GET: Node(
-                    handler=admin_home_handler,
-                    not_found_handler=admin_not_found_handler,
-                    method_not_allowed_handler=method_not_allowed_handler,
-                ),
-                "user": Node(
-                    wildcard=WildCardNode(
-                        name="id",
-                        child=Node(
-                            children={
-                                "rename": Node(
-                                    children={
-                                        LeafKey.POST: Node(
-                                            handler=admin_user_rename_handler,
-                                            not_found_handler=admin_not_found_handler,
-                                            method_not_allowed_handler=method_not_allowed_handler,
-                                            middleware=[admin_user_rename_middleware],
-                                        ),
-                                    },
-                                    not_found_handler=admin_not_found_handler,
-                                    method_not_allowed_handler=method_not_allowed_handler,
-                                ),
-                                "transaction": Node(
-                                    wildcard=WildCardNode(
-                                        name="tx",
-                                        child=Node(
-                                            children={
-                                                LeafKey.GET: Node(
-                                                    handler=admin_user_transaction_view_handler,
-                                                    not_found_handler=admin_not_found_handler,
-                                                    method_not_allowed_handler=method_not_allowed_handler,
+    children=FrozenDict(
+        {
+            "admin": Node(
+                children=FrozenDict(
+                    {
+                        LeafKey.GET: Node(
+                            handler=admin_home_handler,
+                            not_found_handler=admin_not_found_handler,
+                            method_not_allowed_handler=method_not_allowed_handler,
+                        ),
+                        "user": Node(
+                            wildcard=WildCardNode(
+                                name="id",
+                                child=Node(
+                                    children=FrozenDict(
+                                        {
+                                            "rename": Node(
+                                                children=FrozenDict(
+                                                    {
+                                                        LeafKey.POST: Node(
+                                                            handler=admin_user_rename_handler,
+                                                            not_found_handler=admin_not_found_handler,
+                                                            method_not_allowed_handler=method_not_allowed_handler,
+                                                            middleware=(
+                                                                admin_user_rename_middleware,
+                                                            ),
+                                                        ),
+                                                    }
                                                 ),
-                                            },
-                                            not_found_handler=admin_not_found_handler,
-                                            method_not_allowed_handler=method_not_allowed_handler,
-                                        ),
+                                                not_found_handler=admin_not_found_handler,
+                                                method_not_allowed_handler=method_not_allowed_handler,
+                                            ),
+                                            "transaction": Node(
+                                                wildcard=WildCardNode(
+                                                    name="tx",
+                                                    child=Node(
+                                                        children=FrozenDict(
+                                                            {
+                                                                LeafKey.GET: Node(
+                                                                    handler=admin_user_transaction_view_handler,
+                                                                    not_found_handler=admin_not_found_handler,
+                                                                    method_not_allowed_handler=method_not_allowed_handler,
+                                                                ),
+                                                            }
+                                                        ),
+                                                        not_found_handler=admin_not_found_handler,
+                                                        method_not_allowed_handler=method_not_allowed_handler,
+                                                    ),
+                                                ),
+                                                not_found_handler=admin_not_found_handler,
+                                                method_not_allowed_handler=method_not_allowed_handler,
+                                            ),
+                                        }
                                     ),
                                     not_found_handler=admin_not_found_handler,
                                     method_not_allowed_handler=method_not_allowed_handler,
                                 ),
-                            },
+                            ),
                             not_found_handler=admin_not_found_handler,
                             method_not_allowed_handler=method_not_allowed_handler,
+                            middleware=(admin_user_middleware,),
                         ),
-                    ),
-                    not_found_handler=admin_not_found_handler,
-                    method_not_allowed_handler=method_not_allowed_handler,
-                    middleware=[admin_user_middleware],
+                    }
                 ),
-            },
-            not_found_handler=admin_not_found_handler,
-            method_not_allowed_handler=method_not_allowed_handler,
-            middleware=[admin_middleware],
-        ),
-        "static": Node(
-            catchall=CatchAllNode(
-                name="path",
-                child=Node(
-                    children={
-                        LeafKey.GET: Node(
-                            handler=static_handler,
-                            not_found_handler=not_found_handler,
-                            method_not_allowed_handler=static_method_not_allowed_handler,
-                        ),
-                    },
-                    not_found_handler=not_found_handler,
-                    method_not_allowed_handler=static_method_not_allowed_handler,
-                ),
+                not_found_handler=admin_not_found_handler,
+                method_not_allowed_handler=method_not_allowed_handler,
+                middleware=(admin_middleware,),
             ),
-            not_found_handler=not_found_handler,
-            method_not_allowed_handler=static_method_not_allowed_handler,
-        ),
-        "": Node(  # "" is trailing slash (because result of "/foo/".split("/") == ["foo", ""])
-            children={
-                LeafKey.ANY_HTTP: Node(  # None is any method
-                    handler=home_handler,
-                    not_found_handler=not_found_handler,
-                    method_not_allowed_handler=method_not_allowed_handler,
+            "static": Node(
+                catchall=CatchAllNode(
+                    name="path",
+                    child=Node(
+                        children=FrozenDict(
+                            {
+                                LeafKey.GET: Node(
+                                    handler=static_handler,
+                                    not_found_handler=not_found_handler,
+                                    method_not_allowed_handler=static_method_not_allowed_handler,
+                                ),
+                            }
+                        ),
+                        not_found_handler=not_found_handler,
+                        method_not_allowed_handler=static_method_not_allowed_handler,
+                    ),
                 ),
-            },
-            not_found_handler=not_found_handler,
-            method_not_allowed_handler=method_not_allowed_handler,
-        ),
-    },
+                not_found_handler=not_found_handler,
+                method_not_allowed_handler=static_method_not_allowed_handler,
+            ),
+            "": Node(  # "" is trailing slash (because result of "/foo/".split("/") == ["foo", ""])
+                children=FrozenDict(
+                    {
+                        LeafKey.ANY_HTTP: Node(  # None is any method
+                            handler=home_handler,
+                            not_found_handler=not_found_handler,
+                            method_not_allowed_handler=method_not_allowed_handler,
+                        ),
+                    }
+                ),
+                not_found_handler=not_found_handler,
+                method_not_allowed_handler=method_not_allowed_handler,
+            ),
+        }
+    ),
     not_found_handler=not_found_handler,
     method_not_allowed_handler=method_not_allowed_handler,
 )
@@ -271,38 +305,44 @@ tree: Node[Handler] = Node(
 def main() -> None:
     tests = [
         # simple, any method
-        ("/", LeafKey.PATCH, home_handler, []),
+        ("/", LeafKey.PATCH, home_handler, ()),
         # simple, with method
-        ("/admin", LeafKey.GET, admin_home_handler, [admin_middleware]),
+        ("/admin", LeafKey.GET, admin_home_handler, (admin_middleware,)),
         # 404
-        ("/some/nonexistent/route", LeafKey.GET, not_found_handler, []),
+        ("/some/nonexistent/route", LeafKey.GET, not_found_handler, ()),
         # 404 on trailing slash
-        ("/admin/", LeafKey.GET, admin_not_found_handler, []),
+        ("/admin/", LeafKey.GET, admin_not_found_handler, ()),
         # 405
-        ("/admin", LeafKey.DELETE, method_not_allowed_handler, []),
+        ("/admin", LeafKey.DELETE, method_not_allowed_handler, ()),
         # 405
         (
             "/static/bleugh.txt",
             LeafKey.OPTIONS,
             static_method_not_allowed_handler,
-            [],
+            (),
         ),
         # wildcard param
         (
             "/admin/user/1/rename",
             LeafKey.POST,
             admin_user_rename_handler,
-            [admin_middleware, admin_user_middleware, admin_user_rename_middleware],
+            (admin_middleware, admin_user_middleware, admin_user_rename_middleware),
+        ),
+        (
+            "/admin/user/1/rename",
+            LeafKey.POST,
+            admin_user_rename_handler,
+            (admin_middleware, admin_user_middleware, admin_user_rename_middleware),
         ),
         # multiple wildcard params
         (
             "/admin/user/1/transaction/2",
             LeafKey.GET,
             admin_user_transaction_view_handler,
-            [admin_middleware, admin_user_middleware],
+            (admin_middleware, admin_user_middleware),
         ),
         # catchall param
-        ("/static/lib/datastar.min.js", LeafKey.GET, static_handler, []),
+        ("/static/lib/datastar.min.js", LeafKey.GET, static_handler, ()),
     ]
 
     for path, method, expected_handler, expected_middleware in tests:
@@ -315,7 +355,7 @@ def main() -> None:
         print(f"lookup took {end - start:.2E} seconds", file=sys.stderr, flush=True)
 
         assert handler is expected_handler, f"{handler=} is {expected_handler=}"
-        assert middleware == expected_middleware, (
+        assert middleware == list(expected_middleware), (
             f"{middleware=} == {expected_middleware=}"
         )
 
