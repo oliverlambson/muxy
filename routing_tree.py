@@ -67,11 +67,11 @@ class Node[T]:
 
     not_found_handler: T
     method_not_allowed_handler: T
+    middleware: tuple[Middleware[T], ...]
     handler: T | None = field(default=None)
     children: FrozenDict[str | LeafKey, Node[T]] = field(default_factory=FrozenDict)
     wildcard: WildCardNode[T] | None = field(default=None)
     catchall: CatchAllNode[T] | None = field(default=None)
-    middleware: tuple[Middleware[T], ...] = field(default_factory=tuple)
 
 
 @dataclass(slots=True, frozen=True)
@@ -91,7 +91,7 @@ def find_handler[T](
     path: str,
     method: LeafKey,
     tree: Node[T],
-) -> tuple[T, list[Middleware[T]], dict[str, str]]:
+) -> tuple[T, tuple[Middleware[T], ...], dict[str, str]]:
     """Traverses the tree to find the best match handler.
 
     Each path segment priority is: exact match > wildcard match  > catchall match
@@ -103,11 +103,9 @@ def find_handler[T](
     current = tree
     child = None
     params = {}
-    middleware = [*current.middleware]
     for i, seg in enumerate(segments):
         child = current.children.get(seg)
         if child is not None:  # exact match
-            middleware.extend(child.middleware)
             current = child  # traverse to child
             continue
         if current.wildcard is not None:  # fallback to wildcard match
@@ -119,19 +117,18 @@ def find_handler[T](
             current = current.catchall.child  # traverse to catchall child
             break
         # no match
-        return current.not_found_handler, [], {}
+        return current.not_found_handler, (), {}
 
     leaf = current.children.get(method)
     if leaf is None:
         leaf = current.children.get(LeafKey.ANY_HTTP)  # fallback to any method handler
         if leaf is None:
-            return current.method_not_allowed_handler, [], params
+            return current.method_not_allowed_handler, (), params
 
     if leaf.handler is None:
-        return current.not_found_handler, [], {}
+        return current.not_found_handler, (), {}
 
-    middleware.extend(leaf.middleware)
-    return leaf.handler, middleware, params
+    return leaf.handler, leaf.middleware, params
 
 
 # --- END IMPLEMENTATION -------------------------------------------------------
@@ -193,9 +190,7 @@ middleware:
 POST /admin/user/{id}/rename    admin_user_rename_middleware
 """
 # manually create the tree (we'll make nicer ways to construct this later)
-# - persist the error handlers at every node so that the lookup is faster at runtime
-# - should probably persist the middleware at every node too, rather than constructing at
-# runtime
+# - persist the error handlers and middleware at every node so that the lookup is faster at runtime
 tree: Node[Handler] = Node(
     children=FrozenDict(
         {
@@ -206,6 +201,7 @@ tree: Node[Handler] = Node(
                             handler=admin_home_handler,
                             not_found_handler=admin_not_found_handler,
                             method_not_allowed_handler=method_not_allowed_handler,
+                            middleware=(admin_middleware,),
                         ),
                         "user": Node(
                             wildcard=WildCardNode(
@@ -221,6 +217,8 @@ tree: Node[Handler] = Node(
                                                             not_found_handler=admin_not_found_handler,
                                                             method_not_allowed_handler=method_not_allowed_handler,
                                                             middleware=(
+                                                                admin_middleware,
+                                                                admin_user_middleware,
                                                                 admin_user_rename_middleware,
                                                             ),
                                                         ),
@@ -228,6 +226,10 @@ tree: Node[Handler] = Node(
                                                 ),
                                                 not_found_handler=admin_not_found_handler,
                                                 method_not_allowed_handler=method_not_allowed_handler,
+                                                middleware=(
+                                                    admin_middleware,
+                                                    admin_user_middleware,
+                                                ),
                                             ),
                                             "transaction": Node(
                                                 wildcard=WildCardNode(
@@ -239,25 +241,44 @@ tree: Node[Handler] = Node(
                                                                     handler=admin_user_transaction_view_handler,
                                                                     not_found_handler=admin_not_found_handler,
                                                                     method_not_allowed_handler=method_not_allowed_handler,
+                                                                    middleware=(
+                                                                        admin_middleware,
+                                                                        admin_user_middleware,
+                                                                    ),
                                                                 ),
                                                             }
                                                         ),
                                                         not_found_handler=admin_not_found_handler,
                                                         method_not_allowed_handler=method_not_allowed_handler,
+                                                        middleware=(
+                                                            admin_middleware,
+                                                            admin_user_middleware,
+                                                        ),
                                                     ),
                                                 ),
                                                 not_found_handler=admin_not_found_handler,
                                                 method_not_allowed_handler=method_not_allowed_handler,
+                                                middleware=(
+                                                    admin_middleware,
+                                                    admin_user_middleware,
+                                                ),
                                             ),
                                         }
                                     ),
                                     not_found_handler=admin_not_found_handler,
                                     method_not_allowed_handler=method_not_allowed_handler,
+                                    middleware=(
+                                        admin_middleware,
+                                        admin_user_middleware,
+                                    ),
                                 ),
                             ),
                             not_found_handler=admin_not_found_handler,
                             method_not_allowed_handler=method_not_allowed_handler,
-                            middleware=(admin_user_middleware,),
+                            middleware=(
+                                admin_middleware,
+                                admin_user_middleware,
+                            ),
                         ),
                     }
                 ),
@@ -275,15 +296,18 @@ tree: Node[Handler] = Node(
                                     handler=static_handler,
                                     not_found_handler=not_found_handler,
                                     method_not_allowed_handler=static_method_not_allowed_handler,
+                                    middleware=(),
                                 ),
                             }
                         ),
                         not_found_handler=not_found_handler,
                         method_not_allowed_handler=static_method_not_allowed_handler,
+                        middleware=(),
                     ),
                 ),
                 not_found_handler=not_found_handler,
                 method_not_allowed_handler=static_method_not_allowed_handler,
+                middleware=(),
             ),
             "": Node(  # "" is trailing slash (because result of "/foo/".split("/") == ["foo", ""])
                 children=FrozenDict(
@@ -292,16 +316,19 @@ tree: Node[Handler] = Node(
                             handler=home_handler,
                             not_found_handler=not_found_handler,
                             method_not_allowed_handler=method_not_allowed_handler,
+                            middleware=(),
                         ),
                     }
                 ),
                 not_found_handler=not_found_handler,
                 method_not_allowed_handler=method_not_allowed_handler,
+                middleware=(),
             ),
         }
     ),
     not_found_handler=not_found_handler,
     method_not_allowed_handler=method_not_allowed_handler,
+    middleware=(),
 )
 
 
@@ -358,7 +385,7 @@ def main() -> None:
         print(f"lookup took {end - start:.2E} seconds", file=sys.stderr, flush=True)
 
         assert handler is expected_handler, f"{handler=} is {expected_handler=}"
-        assert middleware == list(expected_middleware), (
+        assert middleware == expected_middleware, (
             f"{middleware=} == {expected_middleware=}"
         )
 
