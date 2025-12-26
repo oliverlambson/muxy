@@ -9,6 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import lru_cache, reduce
+from typing import Never
 
 # --- IMPLEMENTATION -----------------------------------------------------------
 type Handler = Callable[[dict[str, str]], None]  # placeholder for ASGI/RSGI app
@@ -45,16 +46,16 @@ class LeafKey(Enum):
 
 
 class FrozenDict(dict):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._hash = None
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         if self._hash is None:
             self._hash = hash(frozenset(self.items()))
         return self._hash
 
-    def _immutable(self, *args, **kwargs):
+    def _immutable(self, *args, **kwargs) -> Never:
         msg = "FrozenDict is immutable"
         raise TypeError(msg)
 
