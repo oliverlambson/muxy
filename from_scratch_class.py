@@ -44,7 +44,7 @@ class LeafKey(Enum):
         return str(self.value)
 
 
-@dataclass
+@dataclass(slots=True)
 class Node[T]:
     """Segment-based trie node"""
 
@@ -57,13 +57,13 @@ class Node[T]:
     middleware: list[Middleware[T]] = field(default_factory=list)
 
 
-@dataclass
+@dataclass(slots=True)
 class WildCardNode[T]:
     name: str
     child: Node[T]
 
 
-@dataclass
+@dataclass(slots=True)
 class CatchAllNode[T]:
     name: str
     child: Node[T]
