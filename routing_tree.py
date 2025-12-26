@@ -119,7 +119,7 @@ def find_handler[T](
             current = current.catchall.child  # traverse to catchall child
             break
         # no match
-        return current.not_found_handler, [], params
+        return current.not_found_handler, [], {}
 
     leaf = current.children.get(method)
     if leaf is None:
@@ -128,7 +128,7 @@ def find_handler[T](
             return current.method_not_allowed_handler, [], params
 
     if leaf.handler is None:
-        return current.not_found_handler, [], params
+        return current.not_found_handler, [], {}
 
     middleware.extend(leaf.middleware)
     return leaf.handler, middleware, params
@@ -193,6 +193,9 @@ middleware:
 POST /admin/user/{id}/rename    admin_user_rename_middleware
 """
 # manually create the tree (we'll make nicer ways to construct this later)
+# - persist the error handlers at every node so that the lookup is faster at runtime
+# - should probably persist the middleware at every node too, rather than constructing at
+# runtime
 tree: Node[Handler] = Node(
     children=FrozenDict(
         {
