@@ -166,10 +166,10 @@ class LeafKey(Enum):
         return str(self.value)
 
 
-class FrozenDict(dict):
+class FrozenDict[K, V](dict[K, V]):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self._hash = None
+        self._hash: int | None = None
 
     def __hash__(self) -> int:
         if self._hash is None:
@@ -288,12 +288,10 @@ def construct_tree[T](
 
     # construct tree
     leaf = Node(
-        not_found_handler=not_found_handler,
-        method_not_allowed_handler=not_found_handler,
         middleware=middleware,
         handler=handler,
     )
-    child = Node(
+    child: Node[T] = Node(
         children=FrozenDict({method: leaf}),
     )
     for seg in reversed(segments):
@@ -359,7 +357,7 @@ def merge_trees[T](tree1: Node[T], tree2: Node[T]) -> Node[T]:
         if tree1.wildcard.name != tree2.wildcard.name:
             msg = "nodes have conflicting wildcards"
             raise ValueError(msg)
-        wildcard = WildCardNode(
+        wildcard: WildCardNode[T] | None = WildCardNode(
             name=tree1.wildcard.name,
             child=merge_trees(tree1.wildcard.child, tree2.wildcard.child),
         )
@@ -370,7 +368,7 @@ def merge_trees[T](tree1: Node[T], tree2: Node[T]) -> Node[T]:
         if tree1.catchall.name != tree2.catchall.name:
             msg = "nodes have conclicting catchalls"
             raise ValueError(msg)
-        catchall = CatchAllNode(
+        catchall: CatchAllNode[T] | None = CatchAllNode(
             name=tree1.catchall.name,
             child=merge_trees(tree1.catchall.child, tree2.catchall.child),
         )
@@ -382,7 +380,7 @@ def merge_trees[T](tree1: Node[T], tree2: Node[T]) -> Node[T]:
     unique_tree1_keys = tree1_keys.difference(tree2_keys)
     unique_tree2_keys = tree2_keys.difference(tree1_keys)
     common_keys = tree1_keys.intersection(tree2_keys)
-    children = FrozenDict(
+    children: FrozenDict[str | LeafKey, Node[T]] = FrozenDict(
         {k: tree1.children[k] for k in unique_tree1_keys}
         | {k: tree2.children[k] for k in unique_tree2_keys}
         | {k: merge_trees(tree1.children[k], tree2.children[k]) for k in common_keys}
@@ -670,7 +668,9 @@ class TestHTTPProto:
     ) -> None:
         raise NotImplementedError
 
-    def response_file(self, status: int, headers: list[tuple[str, str]], file: str):
+    def response_file(
+        self, status: int, headers: list[tuple[str, str]], file: str
+    ) -> None:
         raise NotImplementedError
 
     def response_file_range(
