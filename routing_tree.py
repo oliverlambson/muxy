@@ -3,17 +3,115 @@
 Heavily inspired by go 1.22+ net/http's ServeMux
 """
 
+import asyncio
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import lru_cache, reduce
-from typing import Never
+from typing import Literal, Never, Self
+
+from rsgisrv.rsgi.proto import (
+    HTTPProtocol,
+    HTTPStreamTransport,
+    RSGIHandler,
+    Scope,
+    WebsocketProtocol,
+)
 
 # --- IMPLEMENTATION -----------------------------------------------------------
-type Handler = Callable[[dict[str, str]], None]  # placeholder for ASGI/RSGI app
 type Middleware[T] = Callable[[T], T]
+
+
+class Router:
+    __slots__ = ("_tree",)
+    _tree: Node[RSGIHandler]
+
+    def __init__(self) -> None:
+        self._tree = Node()
+
+    async def __rsgi__(
+        self, scope: Scope, proto: HTTPProtocol | WebsocketProtocol
+    ) -> None:
+        handler, params = self._handler(
+            LeafKey.WEBSOCKET if scope.proto == "ws" else LeafKey(scope.method.upper()),
+            scope.path,
+        )
+        scope = RequestScope.from_scope(scope)
+        scope._set_path_params(params)
+        await handler(scope, proto)  # ty: ignore[invalid-argument-type]  -- handler will be correct type for scope.proto
+
+    def _handler(
+        self, method: LeafKey, path: str
+    ) -> tuple[RSGIHandler, dict[str, str]]:
+        """Returns the handler to use for the request."""
+        handler, middleware, params = find_handler(path, method, self._tree)
+        wrapped_handler = reduce(lambda h, m: m(h), reversed(middleware), handler)
+        return wrapped_handler, params
+
+    def handle(
+        self,
+        method: LeafKey,
+        path: str,
+        handler: RSGIHandler,
+        middleware: tuple[Middleware[RSGIHandler], ...] = (),
+    ) -> None:
+        """Registers handler in tree at path for method, with optional middleware."""
+        self._tree = add_route(self._tree, method, path, handler, middleware)
+
+    def use(self, path: str, *middleware: Middleware[RSGIHandler]) -> None:
+        """Adds middleware to tree at current node."""
+        raise NotImplementedError
+
+    def route(self, path: str, child: Node[RSGIHandler]) -> None:
+        """Merges child tree into current tree at path."""
+        raise NotImplementedError
+
+
+@dataclass(slots=True)
+class RequestScope:
+    """Wrapper for rsgi.Scope to add path vars."""
+
+    proto: Literal["http", "ws"]
+    http_version: Literal["1", "1.1", "2"]
+    rsgi_version: str
+    server: str
+    client: str
+    scheme: str
+    method: str
+    path: str
+    query_string: str
+    headers: Mapping[str, str]
+    authority: str | None
+
+    _path_params: dict[str, str] = field(default_factory=dict)
+
+    @classmethod
+    def from_scope(cls, scope: Scope) -> Self:
+        return cls(
+            proto=scope.proto,
+            http_version=scope.http_version,
+            rsgi_version=scope.rsgi_version,
+            server=scope.server,
+            client=scope.client,
+            scheme=scope.scheme,
+            method=scope.method,
+            path=scope.path,
+            query_string=scope.query_string,
+            headers=scope.headers,
+            authority=scope.authority,
+        )
+
+    @property
+    def path_param(self) -> dict[str, str]:
+        return self._path_params
+
+    def _set_path_params(self, value: dict[str, str]) -> None:
+        if self._path_params:
+            msg = "path vars already set"
+            raise ValueError(msg)
+        self._path_params = value
 
 
 class LeafKey(Enum):
@@ -67,7 +165,7 @@ class Node[T]:
     """Segment-based trie node"""
 
     handler: T | None = field(default=None)
-    middleware: tuple[Middleware[T], ...] = field(default_factory=tuple)
+    middleware: tuple[Middleware[T], ...] = field(default=())
     children: FrozenDict[str | LeafKey, Node[T]] = field(default_factory=FrozenDict)
     wildcard: WildCardNode[T] | None = field(default=None)
     catchall: CatchAllNode[T] | None = field(default=None)
@@ -139,34 +237,6 @@ def find_handler[T](
         return current.not_found_handler, (), {}
 
     return leaf.handler, leaf.middleware, params
-
-
-class Router[T]:
-    _tree: Node[T]
-
-    def handler(self, method: LeafKey, path: str) -> tuple[T, dict[str, str]]:
-        """Returns the handler to use for the request."""
-        handler, middleware, params = find_handler(path, method, self._tree)
-        wrapped_handler = reduce(lambda h, m: m(h), reversed(middleware), handler)
-        return wrapped_handler, params
-
-    def handle(
-        self,
-        method: LeafKey,
-        path: str,
-        handler: T,
-        middleware: tuple[Middleware[T], ...] = (),
-    ) -> None:
-        """Registers handler in tree at path for method, with optional middleware."""
-        self._tree = add_route(self._tree, method, path, handler, middleware)
-
-    def use(self, path: str, *middleware: Middleware[T]) -> None:
-        """Adds middleware to tree at current node."""
-        raise NotImplementedError
-
-    def route(self, path: str, child: Node[T]) -> None:
-        """Merges child tree into current tree at path."""
-        raise NotImplementedError
 
 
 def add_route[T](
@@ -318,21 +388,42 @@ def finalize_tree[T](tree: Node[T]) -> Node[T]:
 
 
 # handlers
-admin_home_handler = lambda _: print("> admin home")  # noqa: E731
-admin_user_rename_handler = lambda params: print(f"> admin user {params['id']} rename")  # noqa: E731
-admin_user_transaction_view_handler = lambda params: print(  # noqa: E731
-    f"> admin user {params['id']} transaction {params['tx']}"
-)
-static_handler = lambda params: print(f"> static {params['path']}")  # noqa: E731
-home_handler = lambda _: print("> home")  # noqa: E731
+async def admin_home_handler(s: RequestScope, p: HTTPProtocol) -> None:
+    print("> admin home")
+
+
+async def admin_user_rename_handler(s: RequestScope, p: HTTPProtocol) -> None:
+    print(f"> admin user {s.path_param['id']} rename")
+
+
+async def admin_user_transaction_view_handler(s: RequestScope, p: HTTPProtocol) -> None:
+    print(f"> admin user {s.path_param['id']} transaction {s.path_param['tx']}")
+
+
+async def static_handler(s: RequestScope, p: HTTPProtocol) -> None:
+    print(f"> static {s.path_param['path']}")
+
+
+async def home_handler(s: RequestScope, p: HTTPProtocol) -> None:
+    print("> home")
+
 
 # not found handlers
-not_found_handler = lambda _: print("> 404")  # noqa: E731
-admin_not_found_handler = lambda _: print("> admin 404")  # noqa: E731
+async def not_found_handler(s: RequestScope, p: HTTPProtocol) -> None:
+    print("> 404")
+
+
+async def admin_not_found_handler(s: RequestScope, p: HTTPProtocol) -> None:
+    print("> admin 404")
+
 
 # method not allowed handlers
-method_not_allowed_handler = lambda _: print("> 405")  # noqa: E731
-static_method_not_allowed_handler = lambda _: print("> static 405")  # noqa: E731
+async def method_not_allowed_handler(s: RequestScope, p: HTTPProtocol) -> None:
+    print("> 405")
+
+
+async def static_method_not_allowed_handler(s: RequestScope, p: HTTPProtocol) -> None:
+    print("> static 405")
 
 
 # middleware
@@ -374,7 +465,7 @@ POST /admin/user/{id}/rename    admin_user_rename_middleware
 """
 # manually create the tree (we'll make nicer ways to construct this later)
 # - persist the error handlers and middleware at every node so that the lookup is faster at runtime
-manual_tree: Node[Handler] = Node(
+manual_tree = Node(
     children=FrozenDict(
         {
             "admin": Node(
@@ -515,65 +606,119 @@ manual_tree: Node[Handler] = Node(
 )
 
 
-def main() -> None:
+def _test_scope(path: str, method: str, params: dict[str, str]) -> RequestScope:
+    scope = RequestScope(
+        proto="http",
+        http_version="1.1",
+        rsgi_version="",
+        server="",
+        client="",
+        scheme="",
+        method=method,
+        path=path,
+        query_string="",
+        headers={},
+        authority=None,
+    )
+    scope._set_path_params(params)
+    return scope
+
+
+class TestHTTPProto:
+    async def __call__(self) -> bytes:
+        raise NotImplementedError
+
+    def __aiter__(self) -> bytes:
+        raise NotImplementedError
+
+    async def client_disconnect(self) -> None:
+        raise NotImplementedError
+
+    def response_empty(self, status: int, headers: list[tuple[str, str]]) -> None:
+        raise NotImplementedError
+
+    def response_str(
+        self, status: int, headers: list[tuple[str, str]], body: str
+    ) -> None:
+        raise NotImplementedError
+
+    def response_bytes(
+        self, status: int, headers: list[tuple[str, str]], body: bytes
+    ) -> None:
+        raise NotImplementedError
+
+    def response_file(self, status: int, headers: list[tuple[str, str]], file: str):
+        raise NotImplementedError
+
+    def response_file_range(
+        self,
+        status: int,
+        headers: list[tuple[str, str]],
+        file: str,
+        start: int,
+        end: int,
+    ) -> None:
+        raise NotImplementedError
+
+    def response_stream(
+        self, status: int, headers: list[tuple[str, str]]
+    ) -> HTTPStreamTransport:
+        raise NotImplementedError
+
+
+_test_proto = TestHTTPProto()
+
+
+async def _test_user_id_handler(s: RequestScope, p: HTTPProtocol) -> None:
+    print(f"hi user {s.path_param['id']}")
+
+
+async def _test_user_profile_handler(s: RequestScope, p: HTTPProtocol) -> None:
+    print(f"user profile: {s.path_param['id']}")
+
+
+async def main() -> None:
     from pprint import pprint
 
     # test tree construction
-    tree = construct_tree(
-        LeafKey.GET,
-        "/user/{id}/profile",
-        lambda params: print(f"hi user {params['id']}"),
-    )
+    tree = construct_tree(LeafKey.GET, "/user/{id}/profile", _test_user_profile_handler)
     pprint(tree)
     handler, middleware, params = find_handler("/user/42/profile", LeafKey.GET, tree)
     wrapped_handler = reduce(lambda h, m: m(h), reversed(middleware), handler)
-    wrapped_handler(params)
+    await wrapped_handler(_test_scope("/user/42/profile", "GET", params), _test_proto)
     del tree, handler, middleware, params, wrapped_handler
     print("-" * 80)
     print()
 
     # test tree merging
-    tree1 = construct_tree(
-        LeafKey.GET,
-        "/user/{id}",
-        lambda params: print(f"hi user {params['id']}"),
-    )
+    tree1 = construct_tree(LeafKey.GET, "/user/{id}", _test_user_id_handler)
     tree2 = construct_tree(
-        LeafKey.GET,
-        "/user/{id}/profile",
-        lambda params: print(f"user profile: {params['id']}"),
+        LeafKey.GET, "/user/{id}/profile", _test_user_profile_handler
     )
     tree = merge_trees(tree1, tree2)
     pprint(tree)
     handler, middleware, params = find_handler("/user/42", LeafKey.GET, tree)
     wrapped_handler = reduce(lambda h, m: m(h), reversed(middleware), handler)
-    wrapped_handler(params)
+    await wrapped_handler(_test_scope("/user/42", "GET", params), _test_proto)
     handler, middleware, params = find_handler("/user/42/profile", LeafKey.GET, tree)
     wrapped_handler = reduce(lambda h, m: m(h), reversed(middleware), handler)
-    wrapped_handler(params)
+    await wrapped_handler(_test_scope("/user/42/profile", "GET", params), _test_proto)
     del tree, tree1, tree2, handler, middleware, params, wrapped_handler
     print("-" * 80)
     print()
 
     # test add route
-    tree = construct_tree(
-        LeafKey.GET,
-        "/user/{id}",
-        lambda params: print(f"hi user {params['id']}"),
-    )
+    tree = construct_tree(LeafKey.GET, "/user/{id}", _test_user_id_handler)
     tree = add_route(
-        tree,
-        LeafKey.GET,
-        "/user/{id}/profile",
-        handler=lambda params: print(f"user profile: {params['id']}"),
+        tree, LeafKey.GET, "/user/{id}/profile", _test_user_profile_handler
     )
     pprint(tree)
     handler, middleware, params = find_handler("/user/42", LeafKey.GET, tree)
     wrapped_handler = reduce(lambda h, m: m(h), reversed(middleware), handler)
-    wrapped_handler(params)
+    await wrapped_handler(_test_scope("/user/42", "GET", params), _test_proto)
     handler, middleware, params = find_handler("/user/42/profile", LeafKey.GET, tree)
     wrapped_handler = reduce(lambda h, m: m(h), reversed(middleware), handler)
-    wrapped_handler(params)
+    await wrapped_handler(_test_scope("/user/42/profile", "GET", params), _test_proto)
     del tree, handler, middleware, params, wrapped_handler
     print("-" * 80)
     print()
@@ -638,8 +783,15 @@ def main() -> None:
         # apply middleware stack
         wrapped_handler = reduce(lambda h, m: m(h), reversed(middleware), handler)
         # call handler
-        wrapped_handler(params)
+        await wrapped_handler(_test_scope(path, method.value, params), _test_proto)
+
+    # test router
+    router = Router()
+    router.handle(LeafKey.GET, "/user/{id}", _test_user_id_handler)
+    router.handle(LeafKey.GET, "/user/{id}/profile", _test_user_profile_handler)
+    await router.__rsgi__(_test_scope("/user/42", "GET", {}), _test_proto)
+    await router.__rsgi__(_test_scope("/user/42/profile", "GET", {}), _test_proto)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
