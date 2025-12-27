@@ -7,10 +7,11 @@ import asyncio
 import sys
 import time
 from collections.abc import Callable, Mapping
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import lru_cache, reduce
-from typing import Literal, Never, Self, overload
+from typing import Literal, Never, overload
 
 from rsgisrv.rsgi.proto import (
     HTTPProtocol,
@@ -30,6 +31,9 @@ type HTTPMethod = Literal[
 type WebsocketMethod = Literal["WEBSOCKET"]
 
 
+path_params: ContextVar[dict[str, str]] = ContextVar("path_params")
+
+
 class Router:
     __slots__ = ("_tree",)
     _tree: Node[RSGIHandler]
@@ -44,9 +48,8 @@ class Router:
             LeafKey.WEBSOCKET if scope.proto == "ws" else LeafKey(scope.method.upper()),
             scope.path,
         )
-        scope = RequestScope.from_scope(scope)
-        scope._set_path_params(params)
-        await handler(scope, proto)  # ty: ignore[invalid-argument-type]  -- handler will be correct type for scope.proto
+        with path_params.set(params):
+            await handler(scope, proto)  # ty: ignore[invalid-argument-type]  -- handler will be correct type for scope.proto
 
     def _handler(
         self, method: LeafKey, path: str
@@ -90,51 +93,6 @@ class Router:
     def route(self, path: str, child: Node[RSGIHandler]) -> None:
         """Merges child tree into current tree at path."""
         raise NotImplementedError
-
-
-@dataclass(slots=True)
-class RequestScope:
-    """Wrapper for rsgi.Scope to add path vars."""
-
-    proto: Literal["http", "ws"]
-    http_version: Literal["1", "1.1", "2"]
-    rsgi_version: str
-    server: str
-    client: str
-    scheme: str
-    method: str
-    path: str
-    query_string: str
-    headers: Mapping[str, str]
-    authority: str | None
-
-    _path_params: dict[str, str] = field(default_factory=dict)
-
-    @classmethod
-    def from_scope(cls, scope: Scope) -> Self:
-        return cls(
-            proto=scope.proto,
-            http_version=scope.http_version,
-            rsgi_version=scope.rsgi_version,
-            server=scope.server,
-            client=scope.client,
-            scheme=scope.scheme,
-            method=scope.method,
-            path=scope.path,
-            query_string=scope.query_string,
-            headers=scope.headers,
-            authority=scope.authority,
-        )
-
-    @property
-    def path_param(self) -> dict[str, str]:
-        return self._path_params
-
-    def _set_path_params(self, value: dict[str, str]) -> None:
-        if self._path_params:
-            msg = "path vars already set"
-            raise ValueError(msg)
-        self._path_params = value
 
 
 class LeafKey(Enum):
@@ -409,41 +367,43 @@ def finalize_tree[T](tree: Node[T]) -> Node[T]:
 
 
 # handlers
-async def admin_home_handler(s: RequestScope, p: HTTPProtocol) -> None:
+async def admin_home_handler(s: Scope, p: HTTPProtocol) -> None:
     print("> admin home")
 
 
-async def admin_user_rename_handler(s: RequestScope, p: HTTPProtocol) -> None:
-    print(f"> admin user {s.path_param['id']} rename")
+async def admin_user_rename_handler(s: Scope, p: HTTPProtocol) -> None:
+    print(f"> admin user {path_params.get()['id']} rename")
 
 
-async def admin_user_transaction_view_handler(s: RequestScope, p: HTTPProtocol) -> None:
-    print(f"> admin user {s.path_param['id']} transaction {s.path_param['tx']}")
+async def admin_user_transaction_view_handler(s: Scope, p: HTTPProtocol) -> None:
+    print(
+        f"> admin user {path_params.get()['id']} transaction {path_params.get()['tx']}"
+    )
 
 
-async def static_handler(s: RequestScope, p: HTTPProtocol) -> None:
-    print(f"> static {s.path_param['path']}")
+async def static_handler(s: Scope, p: HTTPProtocol) -> None:
+    print(f"> static {path_params.get()['path']}")
 
 
-async def home_handler(s: RequestScope, p: HTTPProtocol) -> None:
+async def home_handler(s: Scope, p: HTTPProtocol) -> None:
     print("> home")
 
 
 # not found handlers
-async def not_found_handler(s: RequestScope, p: HTTPProtocol) -> None:
+async def not_found_handler(s: Scope, p: HTTPProtocol) -> None:
     print("> 404")
 
 
-async def admin_not_found_handler(s: RequestScope, p: HTTPProtocol) -> None:
+async def admin_not_found_handler(s: Scope, p: HTTPProtocol) -> None:
     print("> admin 404")
 
 
 # method not allowed handlers
-async def method_not_allowed_handler(s: RequestScope, p: HTTPProtocol) -> None:
+async def method_not_allowed_handler(s: Scope, p: HTTPProtocol) -> None:
     print("> 405")
 
 
-async def static_method_not_allowed_handler(s: RequestScope, p: HTTPProtocol) -> None:
+async def static_method_not_allowed_handler(s: Scope, p: HTTPProtocol) -> None:
     print("> static 405")
 
 
@@ -627,8 +587,23 @@ manual_tree = Node(
 )
 
 
-def _test_scope(path: str, method: str, params: dict[str, str]) -> RequestScope:
-    scope = RequestScope(
+@dataclass
+class TestScope:
+    proto: Literal["http", "ws"]
+    http_version: Literal["1", "1.1", "2"]
+    rsgi_version: str
+    server: str
+    client: str
+    scheme: str
+    method: str
+    path: str
+    query_string: str
+    headers: Mapping[str, str]
+    authority: str | None
+
+
+def _test_scope(path: str, method: str) -> Scope:
+    return TestScope(
         proto="http",
         http_version="1.1",
         rsgi_version="",
@@ -641,8 +616,6 @@ def _test_scope(path: str, method: str, params: dict[str, str]) -> RequestScope:
         headers={},
         authority=None,
     )
-    scope._set_path_params(params)
-    return scope
 
 
 class TestHTTPProto:
@@ -692,12 +665,12 @@ class TestHTTPProto:
 _test_proto = TestHTTPProto()
 
 
-async def _test_user_id_handler(s: RequestScope, p: HTTPProtocol) -> None:
-    print(f"hi user {s.path_param['id']}")
+async def _test_user_id_handler(s: Scope, p: HTTPProtocol) -> None:
+    print(f"hi user {path_params.get()['id']}")
 
 
-async def _test_user_profile_handler(s: RequestScope, p: HTTPProtocol) -> None:
-    print(f"user profile: {s.path_param['id']}")
+async def _test_user_profile_handler(s: Scope, p: HTTPProtocol) -> None:
+    print(f"user profile: {path_params.get()['id']}")
 
 
 async def main() -> None:
@@ -708,7 +681,8 @@ async def main() -> None:
     pprint(tree)
     handler, middleware, params = find_handler("/user/42/profile", LeafKey.GET, tree)
     wrapped_handler = reduce(lambda h, m: m(h), reversed(middleware), handler)
-    await wrapped_handler(_test_scope("/user/42/profile", "GET", params), _test_proto)
+    with path_params.set(params):
+        await wrapped_handler(_test_scope("/user/42/profile", "GET"), _test_proto)
     del tree, handler, middleware, params, wrapped_handler
     print("-" * 80)
     print()
@@ -722,10 +696,12 @@ async def main() -> None:
     pprint(tree)
     handler, middleware, params = find_handler("/user/42", LeafKey.GET, tree)
     wrapped_handler = reduce(lambda h, m: m(h), reversed(middleware), handler)
-    await wrapped_handler(_test_scope("/user/42", "GET", params), _test_proto)
+    with path_params.set(params):
+        await wrapped_handler(_test_scope("/user/42", "GET"), _test_proto)
     handler, middleware, params = find_handler("/user/42/profile", LeafKey.GET, tree)
     wrapped_handler = reduce(lambda h, m: m(h), reversed(middleware), handler)
-    await wrapped_handler(_test_scope("/user/42/profile", "GET", params), _test_proto)
+    with path_params.set(params):
+        await wrapped_handler(_test_scope("/user/42/profile", "GET"), _test_proto)
     del tree, tree1, tree2, handler, middleware, params, wrapped_handler
     print("-" * 80)
     print()
@@ -738,10 +714,12 @@ async def main() -> None:
     pprint(tree)
     handler, middleware, params = find_handler("/user/42", LeafKey.GET, tree)
     wrapped_handler = reduce(lambda h, m: m(h), reversed(middleware), handler)
-    await wrapped_handler(_test_scope("/user/42", "GET", params), _test_proto)
+    with path_params.set(params):
+        await wrapped_handler(_test_scope("/user/42", "GET"), _test_proto)
     handler, middleware, params = find_handler("/user/42/profile", LeafKey.GET, tree)
     wrapped_handler = reduce(lambda h, m: m(h), reversed(middleware), handler)
-    await wrapped_handler(_test_scope("/user/42/profile", "GET", params), _test_proto)
+    with path_params.set(params):
+        await wrapped_handler(_test_scope("/user/42/profile", "GET"), _test_proto)
     del tree, handler, middleware, params, wrapped_handler
     print("-" * 80)
     print()
@@ -806,14 +784,15 @@ async def main() -> None:
         # apply middleware stack
         wrapped_handler = reduce(lambda h, m: m(h), reversed(middleware), handler)
         # call handler
-        await wrapped_handler(_test_scope(path, method.value, params), _test_proto)
+        with path_params.set(params):
+            await wrapped_handler(_test_scope(path, method.value), _test_proto)
 
     # test router
     router = Router()
     router.handle("GET", "/user/{id}", _test_user_id_handler)
     router.handle("GET", "/user/{id}/profile", _test_user_profile_handler)
-    await router.__rsgi__(_test_scope("/user/42", "GET", {}), _test_proto)
-    await router.__rsgi__(_test_scope("/user/42/profile", "GET", {}), _test_proto)
+    await router.__rsgi__(_test_scope("/user/42", "GET"), _test_proto)
+    await router.__rsgi__(_test_scope("/user/42/profile", "GET"), _test_proto)
 
 
 if __name__ == "__main__":
