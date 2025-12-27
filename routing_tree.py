@@ -141,6 +141,179 @@ def find_handler[T](
     return leaf.handler, leaf.middleware, params
 
 
+class Router[T]:
+    _tree: Node[T]
+
+    def handler(self, method: LeafKey, path: str) -> tuple[T, dict[str, str]]:
+        """Returns the handler to use for the request."""
+        handler, middleware, params = find_handler(path, method, self._tree)
+        wrapped_handler = reduce(lambda h, m: m(h), reversed(middleware), handler)
+        return wrapped_handler, params
+
+    def handle(
+        self,
+        method: LeafKey,
+        path: str,
+        handler: T,
+        middleware: tuple[Middleware[T], ...] = (),
+    ) -> None:
+        """Registers handler in tree at path for method, with optional middleware."""
+        self._tree = add_route(self._tree, method, path, handler, middleware)
+
+    def use(self, path: str, *middleware: Middleware[T]) -> None:
+        """Adds middleware to tree at current node."""
+        raise NotImplementedError
+
+    def route(self, path: str, child: Node[T]) -> None:
+        """Merges child tree into current tree at path."""
+        raise NotImplementedError
+
+
+def add_route[T](
+    tree: Node[T],
+    method: LeafKey,
+    path: str,
+    handler: T,
+    middleware: tuple[Middleware[T], ...] = (),
+) -> Node[T]:
+    """add route to tree for handler on method/path with optional middleware"""
+    new_tree = construct_tree(method, path, handler, middleware)
+    return merge_trees(tree, new_tree)
+
+
+def construct_tree[T](
+    method: LeafKey,
+    path: str,
+    handler: T,
+    middleware: tuple[Middleware[T], ...] = (),
+) -> Node[T]:
+    """construct tree for handler on method/path with optional middleware"""
+    if not path.startswith("/"):
+        msg = f"path must start with '/', provided {path=}"
+        raise ValueError(msg)
+    segments = path[1:].split("/")
+
+    # construct tree
+    leaf = Node(
+        not_found_handler=not_found_handler,
+        method_not_allowed_handler=not_found_handler,
+        middleware=middleware,
+        handler=handler,
+    )
+    child = Node(
+        children=FrozenDict({method: leaf}),
+    )
+    for seg in reversed(segments):
+        if seg.startswith("{") and seg.endswith("...}"):
+            name = seg[1:-4]
+            child = Node(
+                catchall=CatchAllNode(
+                    name=name,
+                    child=child,
+                ),
+            )
+        elif seg.startswith("{") and seg.endswith("}"):
+            name = seg[1:-1]
+            child = Node(
+                wildcard=WildCardNode(
+                    name=name,
+                    child=child,
+                ),
+            )
+        else:
+            child = Node(
+                children=FrozenDict({seg: child}),
+            )
+
+    return child
+
+
+def merge_trees[T](tree1: Node[T], tree2: Node[T]) -> Node[T]:
+    """merge tree1 and tree2, error on conflict"""
+    if (
+        tree1.handler is not None
+        and tree2.handler is not None
+        and tree1.handler is not tree2.handler
+    ):
+        msg = "nodes have conflicting handlers"
+        raise ValueError(msg)
+    handler = tree1.handler or tree2.handler
+    if (
+        tree1.not_found_handler is not None
+        and tree2.not_found_handler is not None
+        and tree1.not_found_handler is not tree2.not_found_handler
+    ):
+        msg = "nodes have conflicting not found handlers"
+        raise ValueError(msg)
+    not_found_handler = tree1.not_found_handler or tree2.not_found_handler
+    if (
+        tree1.method_not_allowed_handler is not None
+        and tree2.method_not_allowed_handler is not None
+        and tree1.method_not_allowed_handler is not tree2.method_not_allowed_handler
+    ):
+        msg = "nodes have conflicting method not allowed handlers"
+        raise ValueError(msg)
+    method_not_allowed_handler = (
+        tree1.method_not_allowed_handler or tree2.method_not_allowed_handler
+    )
+
+    if tree1.middleware != tree2.middleware:
+        msg = "nodes have conflicting middleware"
+        raise ValueError(msg)
+    middleware = tree1.middleware or tree2.middleware
+
+    if tree1.wildcard is not None and tree2.wildcard and tree2.wildcard is not None:
+        if tree1.wildcard.name != tree2.wildcard.name:
+            msg = "nodes have conflicting wildcards"
+            raise ValueError(msg)
+        wildcard = WildCardNode(
+            name=tree1.wildcard.name,
+            child=merge_trees(tree1.wildcard.child, tree2.wildcard.child),
+        )
+    else:
+        wildcard = tree1.wildcard or tree2.wildcard
+
+    if tree1.catchall is not None and tree2.catchall is not None:
+        if tree1.catchall.name != tree2.catchall.name:
+            msg = "nodes have conclicting catchalls"
+            raise ValueError(msg)
+        catchall = CatchAllNode(
+            name=tree1.catchall.name,
+            child=merge_trees(tree1.catchall.child, tree2.catchall.child),
+        )
+    else:
+        catchall = tree1.catchall or tree2.catchall
+
+    tree1_keys = set(tree1.children.keys())
+    tree2_keys = set(tree2.children.keys())
+    unique_tree1_keys = tree1_keys.difference(tree2_keys)
+    unique_tree2_keys = tree2_keys.difference(tree1_keys)
+    common_keys = tree1_keys.intersection(tree2_keys)
+    children = FrozenDict(
+        {k: tree1.children[k] for k in unique_tree1_keys}
+        | {k: tree2.children[k] for k in unique_tree2_keys}
+        | {k: merge_trees(tree1.children[k], tree2.children[k]) for k in common_keys}
+    )
+
+    return Node(
+        handler=handler,
+        middleware=middleware,
+        children=children,
+        wildcard=wildcard,
+        catchall=catchall,
+        not_found_handler=not_found_handler,
+        method_not_allowed_handler=method_not_allowed_handler,
+    )
+
+
+def finalize_tree[T](tree: Node[T]) -> Node[T]:
+    """
+    cascade not_found_handler, method_not_allowed_handler, and middleware down
+    through tree
+    """
+    raise NotImplementedError
+
+
 # --- END IMPLEMENTATION -------------------------------------------------------
 
 
@@ -201,7 +374,7 @@ POST /admin/user/{id}/rename    admin_user_rename_middleware
 """
 # manually create the tree (we'll make nicer ways to construct this later)
 # - persist the error handlers and middleware at every node so that the lookup is faster at runtime
-tree: Node[Handler] = Node(
+manual_tree: Node[Handler] = Node(
     children=FrozenDict(
         {
             "admin": Node(
@@ -343,6 +516,69 @@ tree: Node[Handler] = Node(
 
 
 def main() -> None:
+    from pprint import pprint
+
+    # test tree construction
+    tree = construct_tree(
+        LeafKey.GET,
+        "/user/{id}/profile",
+        lambda params: print(f"hi user {params['id']}"),
+    )
+    pprint(tree)
+    handler, middleware, params = find_handler("/user/42/profile", LeafKey.GET, tree)
+    wrapped_handler = reduce(lambda h, m: m(h), reversed(middleware), handler)
+    wrapped_handler(params)
+    del tree, handler, middleware, params, wrapped_handler
+    print("-" * 80)
+    print()
+
+    # test tree merging
+    tree1 = construct_tree(
+        LeafKey.GET,
+        "/user/{id}",
+        lambda params: print(f"hi user {params['id']}"),
+    )
+    tree2 = construct_tree(
+        LeafKey.GET,
+        "/user/{id}/profile",
+        lambda params: print(f"user profile: {params['id']}"),
+    )
+    tree = merge_trees(tree1, tree2)
+    pprint(tree)
+    handler, middleware, params = find_handler("/user/42", LeafKey.GET, tree)
+    wrapped_handler = reduce(lambda h, m: m(h), reversed(middleware), handler)
+    wrapped_handler(params)
+    handler, middleware, params = find_handler("/user/42/profile", LeafKey.GET, tree)
+    wrapped_handler = reduce(lambda h, m: m(h), reversed(middleware), handler)
+    wrapped_handler(params)
+    del tree, tree1, tree2, handler, middleware, params, wrapped_handler
+    print("-" * 80)
+    print()
+
+    # test add route
+    tree = construct_tree(
+        LeafKey.GET,
+        "/user/{id}",
+        lambda params: print(f"hi user {params['id']}"),
+    )
+    tree = add_route(
+        tree,
+        LeafKey.GET,
+        "/user/{id}/profile",
+        handler=lambda params: print(f"user profile: {params['id']}"),
+    )
+    pprint(tree)
+    handler, middleware, params = find_handler("/user/42", LeafKey.GET, tree)
+    wrapped_handler = reduce(lambda h, m: m(h), reversed(middleware), handler)
+    wrapped_handler(params)
+    handler, middleware, params = find_handler("/user/42/profile", LeafKey.GET, tree)
+    wrapped_handler = reduce(lambda h, m: m(h), reversed(middleware), handler)
+    wrapped_handler(params)
+    del tree, handler, middleware, params, wrapped_handler
+    print("-" * 80)
+    print()
+
+    # test routing
     tests = [
         # simple, any method
         ("/", LeafKey.PATCH, home_handler, ()),
@@ -389,7 +625,7 @@ def main() -> None:
         print(method, path, file=sys.stderr, flush=True, end=" ")
 
         start = time.perf_counter()
-        handler, middleware, params = find_handler(path, method, tree)
+        handler, middleware, params = find_handler(path, method, manual_tree)
         end = time.perf_counter()
 
         print(f"lookup took {end - start:.2E} seconds", file=sys.stderr, flush=True)
