@@ -66,13 +66,13 @@ class FrozenDict(dict):
 class Node[T]:
     """Segment-based trie node"""
 
-    not_found_handler: T
-    method_not_allowed_handler: T
-    middleware: tuple[Middleware[T], ...]
     handler: T | None = field(default=None)
+    middleware: tuple[Middleware[T], ...] = field(default_factory=tuple)
     children: FrozenDict[str | LeafKey, Node[T]] = field(default_factory=FrozenDict)
     wildcard: WildCardNode[T] | None = field(default=None)
     catchall: CatchAllNode[T] | None = field(default=None)
+    not_found_handler: T | None = None
+    method_not_allowed_handler: T | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -118,15 +118,24 @@ def find_handler[T](
             current = current.catchall.child  # traverse to catchall child
             break
         # no match
+        if current.not_found_handler is None:
+            msg = "No not found handler set"
+            raise ValueError(msg)
         return current.not_found_handler, (), {}
 
     leaf = current.children.get(method)
     if leaf is None:
         leaf = current.children.get(LeafKey.ANY_HTTP)  # fallback to any method handler
         if leaf is None:
+            if current.method_not_allowed_handler is None:
+                msg = "No method not allowed handler set"
+                raise ValueError(msg)
             return current.method_not_allowed_handler, (), params
 
     if leaf.handler is None:
+        if current.not_found_handler is None:
+            msg = "No not found handler set"
+            raise ValueError(msg)
         return current.not_found_handler, (), {}
 
     return leaf.handler, leaf.middleware, params
