@@ -10,18 +10,24 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import lru_cache, reduce
-from typing import Literal, Never, Self
+from typing import Literal, Never, Self, overload
 
 from rsgisrv.rsgi.proto import (
     HTTPProtocol,
     HTTPStreamTransport,
     RSGIHandler,
+    RSGIHTTPHandler,
+    RSGIWebsocketHandler,
     Scope,
     WebsocketProtocol,
 )
 
 # --- IMPLEMENTATION -----------------------------------------------------------
 type Middleware[T] = Callable[[T], T]
+type HTTPMethod = Literal[
+    "CONNECT", "DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT", "TRACE"
+]
+type WebsocketMethod = Literal["WEBSOCKET"]
 
 
 class Router:
@@ -46,19 +52,36 @@ class Router:
         self, method: LeafKey, path: str
     ) -> tuple[RSGIHandler, dict[str, str]]:
         """Returns the handler to use for the request."""
+        # path is unescaped by the rsgi server, so we don't need to use urllib.parse.(un)quote
         handler, middleware, params = find_handler(path, method, self._tree)
         wrapped_handler = reduce(lambda h, m: m(h), reversed(middleware), handler)
         return wrapped_handler, params
 
+    @overload
     def handle(
         self,
-        method: LeafKey,
+        method: HTTPMethod,
+        path: str,
+        handler: RSGIHTTPHandler,
+        middleware: tuple[Middleware[RSGIHandler], ...] = (),
+    ) -> None: ...
+    @overload
+    def handle(
+        self,
+        method: WebsocketMethod,
+        path: str,
+        handler: RSGIWebsocketHandler,
+        middleware: tuple[Middleware[RSGIHandler], ...] = (),
+    ) -> None: ...
+    def handle(
+        self,
+        method: HTTPMethod | WebsocketMethod,
         path: str,
         handler: RSGIHandler,
         middleware: tuple[Middleware[RSGIHandler], ...] = (),
     ) -> None:
         """Registers handler in tree at path for method, with optional middleware."""
-        self._tree = add_route(self._tree, method, path, handler, middleware)
+        self._tree = add_route(self._tree, LeafKey(method), path, handler, middleware)
 
     def use(self, path: str, *middleware: Middleware[RSGIHandler]) -> None:
         """Adds middleware to tree at current node."""
@@ -787,8 +810,8 @@ async def main() -> None:
 
     # test router
     router = Router()
-    router.handle(LeafKey.GET, "/user/{id}", _test_user_id_handler)
-    router.handle(LeafKey.GET, "/user/{id}/profile", _test_user_profile_handler)
+    router.handle("GET", "/user/{id}", _test_user_id_handler)
+    router.handle("GET", "/user/{id}/profile", _test_user_profile_handler)
     await router.__rsgi__(_test_scope("/user/42", "GET", {}), _test_proto)
     await router.__rsgi__(_test_scope("/user/42/profile", "GET", {}), _test_proto)
 
