@@ -1,8 +1,3 @@
-"""Zero dependency router implementation with path param support.
-
-Heavily inspired by go 1.22+ net/http's ServeMux
-"""
-
 import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
