@@ -1,7 +1,7 @@
 # /// script
 # requires-python = ">=3.14"
 # dependencies = [
-#     "rsgi-srv @ file:///${PROJECT_ROOT}/../rsgi-srv",
+#     "muxy @ file:///${PROJECT_ROOT}/../muxy",
 # ]
 # ///
 import asyncio
@@ -9,8 +9,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
-from rsgisrv.router import Router, path_params
-from rsgisrv.rsgi import (
+from muxy.router import Router, path_params
+from muxy.rsgi import (
     HTTPProtocol,
     HTTPScope,
     HTTPStreamTransport,

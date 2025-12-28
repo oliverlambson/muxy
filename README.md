@@ -1,4 +1,4 @@
-# rsgi-srv
+# muxy
 
 A router/http request multiplexer for composing servers conforming to
 Granian's Rust Server Gateway Interface (RSGI)

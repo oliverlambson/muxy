@@ -1,7 +1,7 @@
 # /// script
 # requires-python = ">=3.14"
 # dependencies = [
-#     "rsgi-srv @ file:///${PROJECT_ROOT}/../rsgi-srv",
+#     "muxy @ file:///${PROJECT_ROOT}/../muxy",
 # ]
 # ///
 import asyncio
@@ -12,13 +12,13 @@ from dataclasses import dataclass
 from functools import reduce
 from typing import Literal
 
-from rsgisrv.rsgi import (
+from muxy.rsgi import (
     HTTPProtocol,
     HTTPScope,
     HTTPStreamTransport,
     Scope,
 )
-from rsgisrv.tree import (
+from muxy.tree import (
     CatchAllNode,
     FrozenDict,
     LeafKey,

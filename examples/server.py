@@ -1,13 +1,13 @@
 # /// script
 # requires-python = ">=3.14"
 # dependencies = [
-#     "rsgi-srv @ file:///${PROJECT_ROOT}/../rsgi-srv",
+#     "muxy @ file:///${PROJECT_ROOT}/../muxy",
 #     "granian[uvloop]>=2.6.0,<3.0.0",
 # ]
 # ///
 """RSGI server demo.
 
-Fully functional web server using Granian + rsgisrv Router.
+Fully functional web server using Granian + muxy Router.
 """
 
 import asyncio
@@ -17,8 +17,8 @@ from json.decoder import JSONDecodeError
 
 from granian.server.embed import Server
 
-from rsgisrv.router import Router, path_params
-from rsgisrv.rsgi import (
+from muxy.router import Router, path_params
+from muxy.rsgi import (
     HTTPProtocol,
     RSGIHTTPHandler,
     Scope,
