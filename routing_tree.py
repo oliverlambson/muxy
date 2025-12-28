@@ -15,12 +15,14 @@ from typing import Literal, Never, overload
 
 from rsgisrv.rsgi.proto import (
     HTTPProtocol,
+    HTTPScope,
     HTTPStreamTransport,
     RSGIHandler,
     RSGIHTTPHandler,
     RSGIWebsocketHandler,
     Scope,
     WebsocketProtocol,
+    WebsocketScope,
 )
 
 # --- IMPLEMENTATION -----------------------------------------------------------
@@ -41,16 +43,45 @@ class Router:
     def __init__(self) -> None:
         self._tree = Node()
 
+    @overload
+    async def __rsgi__(self, scope: HTTPScope, proto: HTTPProtocol) -> None: ...
+    @overload
+    async def __rsgi__(
+        self, scope: WebsocketScope, proto: WebsocketProtocol
+    ) -> None: ...
     async def __rsgi__(
         self, scope: Scope, proto: HTTPProtocol | WebsocketProtocol
     ) -> None:
         handler, params = self._handler(
-            LeafKey.WEBSOCKET if scope.proto == "ws" else LeafKey(scope.method.upper()),
+            LeafKey(scope.method.upper())
+            if scope.proto == "http"
+            else LeafKey.WEBSOCKET,
             scope.path,
         )
         with path_params.set(params):
             await handler(scope, proto)  # ty: ignore[invalid-argument-type]  -- handler will be correct type for scope.proto
 
+    @overload
+    def _handler(
+        self,
+        method: Literal[
+            LeafKey.CONNECT,
+            LeafKey.DELETE,
+            LeafKey.GET,
+            LeafKey.HEAD,
+            LeafKey.OPTIONS,
+            LeafKey.PATCH,
+            LeafKey.POST,
+            LeafKey.PUT,
+            LeafKey.TRACE,
+            LeafKey.ANY_HTTP,
+        ],
+        path: str,
+    ) -> tuple[RSGIHTTPHandler, dict[str, str]]: ...
+    @overload
+    def _handler(
+        self, method: Literal[LeafKey.WEBSOCKET], path: str
+    ) -> tuple[RSGIWebsocketHandler, dict[str, str]]: ...
     def _handler(
         self, method: LeafKey, path: str
     ) -> tuple[RSGIHandler, dict[str, str]]:
@@ -588,8 +619,8 @@ manual_tree = Node(
 
 
 @dataclass
-class TestScope:
-    proto: Literal["http", "ws"]
+class TestHttpScope:
+    proto: Literal["http"]
     http_version: Literal["1", "1.1", "2"]
     rsgi_version: str
     server: str
@@ -602,8 +633,8 @@ class TestScope:
     authority: str | None
 
 
-def _test_scope(path: str, method: str) -> Scope:
-    return TestScope(
+def _test_scope(path: str, method: str) -> HTTPScope:
+    return TestHttpScope(
         proto="http",
         http_version="1.1",
         rsgi_version="",

@@ -74,8 +74,8 @@ type RSGIHandler = RSGIHTTPHandler | RSGIWebsocketHandler
 type RSGIMiddleware = Callable[[RSGI], RSGI]
 
 
-class Scope(Protocol):
-    proto: Literal["http", "ws"]
+class HTTPScope(Protocol):
+    proto: Literal["http"]
     http_version: Literal["1", "1.1", "2"]
     rsgi_version: str
     server: str
@@ -86,6 +86,23 @@ class Scope(Protocol):
     query_string: str
     headers: Mapping[str, str]
     authority: str | None
+
+
+class WebsocketScope(Protocol):
+    proto: Literal["ws"]
+    http_version: Literal["1", "1.1", "2"]
+    rsgi_version: str
+    server: str
+    client: str
+    scheme: str
+    method: str
+    path: str
+    query_string: str
+    headers: Mapping[str, str]
+    authority: str | None
+
+
+type Scope = HTTPScope | WebsocketScope
 
 
 class HTTPProtocol(Protocol):
