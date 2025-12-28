@@ -94,7 +94,7 @@ class Router:
     @overload
     def handle(
         self,
-        method: HTTPMethod,
+        method: HTTPMethod | None,
         path: str,
         handler: RSGIHTTPHandler,
         middleware: tuple[Middleware[RSGIHandler], ...] = (),
@@ -109,16 +109,22 @@ class Router:
     ) -> None: ...
     def handle(
         self,
-        method: HTTPMethod | WebsocketMethod,
+        method: HTTPMethod | WebsocketMethod | None,
         path: str,
         handler: RSGIHandler,
         middleware: tuple[Middleware[RSGIHandler], ...] = (),
     ) -> None:
         """Registers handler in tree at path for method, with optional middleware."""
-        self._tree = add_route(self._tree, LeafKey(method), path, handler, middleware)
+        self._tree = add_route(
+            self._tree,
+            LeafKey(method) if method is not None else LeafKey.ANY_HTTP,
+            path,
+            handler,
+            middleware,
+        )
 
     def use(self, path: str, *middleware: Middleware[RSGIHandler]) -> None:
-        """Adds middleware to tree at current node."""
+        """Adds middleware to tree at node for path."""
         raise NotImplementedError
 
     def route(self, path: str, child: Node[RSGIHandler]) -> None:
