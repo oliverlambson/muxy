@@ -1,7 +1,7 @@
 [project]
 name = "muxy"
-version = "0.1.0.dev1"
-description = "Zero-dependency web router."
+version = "0.1.0.dev2"
+description = "Zero-dependency router for building HTTP services."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -30,7 +30,6 @@ keywords = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/oliverlambson/muxy"
 Repository = "https://github.com/oliverlambson/muxy"
 Issues = "https://github.com/oliverlambson/muxy/issues"
 Changelog = "https://github.com/oliverlambson/muxy/blob/main/CHANGELOG.md"
