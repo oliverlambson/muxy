@@ -1,3 +1,9 @@
+# /// script
+# requires-python = ">=3.14"
+# dependencies = [
+#     "rsgi-srv @ file:///${PROJECT_ROOT}/../rsgi-srv",
+# ]
+# ///
 import asyncio
 import sys
 import time
