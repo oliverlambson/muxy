@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from rsgisrv.router import Router, path_params
-from rsgisrv.rsgi.proto import (
+from rsgisrv.rsgi import (
     HTTPProtocol,
     HTTPScope,
     HTTPStreamTransport,

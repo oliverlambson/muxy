@@ -8,7 +8,7 @@ from functools import reduce
 from typing import Literal, overload
 
 from .routing_tree import LeafKey, Node, add_route, find_handler, path_params
-from .rsgi.proto import (
+from .rsgi import (
     HTTPProtocol,
     HTTPScope,
     RSGIHandler,

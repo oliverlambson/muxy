@@ -18,7 +18,7 @@ from rsgisrv.routing_tree import (
     merge_trees,
     path_params,
 )
-from rsgisrv.rsgi.proto import (
+from rsgisrv.rsgi import (
     HTTPProtocol,
     HTTPScope,
     HTTPStreamTransport,
