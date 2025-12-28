@@ -7,7 +7,6 @@ from collections.abc import Callable
 from functools import reduce
 from typing import Literal, overload
 
-from .routing_tree import LeafKey, Node, add_route, find_handler, path_params
 from .rsgi import (
     HTTPProtocol,
     HTTPScope,
@@ -18,6 +17,7 @@ from .rsgi import (
     WebsocketProtocol,
     WebsocketScope,
 )
+from .tree import LeafKey, Node, add_route, find_handler, path_params
 
 # --- IMPLEMENTATION -----------------------------------------------------------
 type Middleware[T] = Callable[[T], T]

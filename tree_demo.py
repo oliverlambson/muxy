@@ -6,7 +6,13 @@ from dataclasses import dataclass
 from functools import reduce
 from typing import Literal
 
-from rsgisrv.routing_tree import (
+from rsgisrv.rsgi import (
+    HTTPProtocol,
+    HTTPScope,
+    HTTPStreamTransport,
+    Scope,
+)
+from rsgisrv.tree import (
     CatchAllNode,
     FrozenDict,
     LeafKey,
@@ -17,12 +23,6 @@ from rsgisrv.routing_tree import (
     find_handler,
     merge_trees,
     path_params,
-)
-from rsgisrv.rsgi import (
-    HTTPProtocol,
-    HTTPScope,
-    HTTPStreamTransport,
-    Scope,
 )
 
 
