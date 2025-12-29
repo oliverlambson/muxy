@@ -9,13 +9,87 @@ from muxy.tree import (
     Node,
     WildCardNode,
     _construct_route_tree,
+    _merge_trees,
     find_handler,
 )
 
 
-@pytest.mark.xfail
 def test__merge_trees() -> None:
-    raise NotImplementedError
+    user_profile_handler = lambda: "user_profile_handler"  # noqa: E731
+    user_id_handler = lambda: "user_id_handler"  # noqa: E731
+    tree1 = Node(
+        children=FrozenDict(
+            {
+                "user": Node(
+                    wildcard=WildCardNode(
+                        name="id",
+                        child=Node(
+                            children=FrozenDict(
+                                {
+                                    "profile": Node(
+                                        children=FrozenDict(
+                                            {
+                                                LeafKey.GET: Node(
+                                                    handler=user_profile_handler
+                                                )
+                                            }
+                                        )
+                                    )
+                                }
+                            )
+                        ),
+                    )
+                )
+            }
+        )
+    )
+    tree2 = Node(
+        children=FrozenDict(
+            {
+                "user": Node(
+                    wildcard=WildCardNode(
+                        name="id",
+                        child=Node(
+                            children=FrozenDict(
+                                {
+                                    LeafKey.GET: Node(handler=user_id_handler),
+                                }
+                            )
+                        ),
+                    )
+                )
+            }
+        )
+    )
+    tree = _merge_trees(tree1, tree2)
+    expected_tree = Node(
+        children=FrozenDict(
+            {
+                "user": Node(
+                    wildcard=WildCardNode(
+                        name="id",
+                        child=Node(
+                            children=FrozenDict(
+                                {
+                                    LeafKey.GET: Node(handler=user_id_handler),
+                                    "profile": Node(
+                                        children=FrozenDict(
+                                            {
+                                                LeafKey.GET: Node(
+                                                    handler=user_profile_handler
+                                                )
+                                            }
+                                        )
+                                    ),
+                                }
+                            )
+                        ),
+                    )
+                )
+            }
+        )
+    )
+    assert tree == expected_tree
 
 
 @pytest.mark.xfail
