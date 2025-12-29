@@ -22,6 +22,7 @@ from muxy.rsgi import (
     HTTPProtocol,
     RSGIHTTPHandler,
     Scope,
+    HTTPScope,
 )
 
 ADDRESS = "127.0.0.1"
@@ -40,8 +41,18 @@ CREATE TABLE IF NOT EXISTS product (
 """)
 
 
+async def not_found(_scope: HTTPScope, proto: HTTPProtocol) -> None:
+    proto.response_str(404, [], "Not found")
+
+
+async def method_not_allowed(_scope: HTTPScope, proto: HTTPProtocol) -> None:
+    proto.response_str(404, [], "Method not allowed")
+
+
 async def main() -> None:
     router = Router()
+    router.not_found(not_found)
+    router.method_not_allowed(method_not_allowed)
     router.get("/user/{id}", get_user(_db))
     router.get("/user/", get_users(_db))
     router.post("/user/", create_user(_db))
@@ -77,7 +88,12 @@ def get_user(db: sqlite3.Connection) -> RSGIHTTPHandler:
     async def handler(s: Scope, p: HTTPProtocol) -> None:
         cur = db.cursor()
         user_id = path_params.get()["id"]
-        cur.execute("SELECT * FROM user WHERE id = ?", user_id)
+        try:
+            user_id = int(user_id)
+        except ValueError:
+            p.response_empty(404, [])
+            return
+        cur.execute("SELECT * FROM user WHERE id = ?", (user_id,))
         result = cur.fetchone()
         if result is None:
             p.response_empty(404, [])
@@ -154,7 +170,12 @@ def get_product(db: sqlite3.Connection) -> RSGIHTTPHandler:
 
     async def handler(s: Scope, p: HTTPProtocol) -> None:
         product_id = path_params.get()["id"]
-        cur.execute("SELECT * FROM product WHERE id = ?", product_id)
+        try:
+            product_id = int(product_id)
+        except ValueError:
+            p.response_empty(404, [])
+            return
+        cur.execute("SELECT * FROM product WHERE id = ?", (product_id,))
         result = cur.fetchone()
         if result is None:
             p.response_empty(404, [])
