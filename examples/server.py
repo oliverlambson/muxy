@@ -18,7 +18,7 @@ from json.decoder import JSONDecodeError
 
 from granian.server.embed import Server
 
-from muxy.router import Router, path_params
+from muxy import Router, path_params
 from muxy.rsgi import (
     HTTPProtocol,
     HTTPScope,

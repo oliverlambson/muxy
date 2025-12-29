@@ -31,7 +31,7 @@ chi's `Mux`.
 import asyncio
 
 from granian.server.embed import Server
-from muxy.router import Router
+from muxy import Router
 from muxy.rsgi import HTTPProtocol, HTTPScope
 
 async def home(s: HTTPScope, p: HTTPProtocol) -> None:
