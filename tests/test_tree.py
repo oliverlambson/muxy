@@ -14,6 +14,7 @@ from muxy.tree import (
     add_route,
     finalize_tree,
     find_handler,
+    mount_tree,
 )
 
 
@@ -162,9 +163,39 @@ def test_finalize_tree() -> None:
     assert tree == finalized_tree
 
 
-@pytest.mark.xfail
 def test_mount_tree() -> None:
-    raise NotImplementedError
+    parent_handler = lambda: "parent_handler"  # noqa: E731
+    child_handler = lambda: "child_handler"  # noqa: E731
+    parent = Node(
+        children=FrozenDict(
+            {
+                LeafKey.GET: Node(handler=parent_handler),
+            }
+        )
+    )
+    child = Node(
+        children=FrozenDict(
+            {
+                LeafKey.GET: Node(handler=child_handler),
+            }
+        )
+    )
+    tree = mount_tree("/api", parent, child)
+    expected_tree = Node(
+        children=FrozenDict(
+            {
+                LeafKey.GET: Node(handler=parent_handler),
+                "api": Node(
+                    children=FrozenDict(
+                        {
+                            LeafKey.GET: Node(handler=child_handler),
+                        }
+                    )
+                ),
+            }
+        )
+    )
+    assert tree == expected_tree
 
 
 def test_add_route() -> None:
