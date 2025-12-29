@@ -65,13 +65,13 @@ from muxy.rsgi import HTTPProtocol, HTTPScope, RSGIHTTPHandler
 
 
 async def main() -> None:
-    _db = sqlite3.connect(":memory:")
+    db = sqlite3.connect(":memory:")
 
     router = Router()
     router.not_found(not_found)
     router.method_not_allowed(method_not_allowed)
     router.get("/", home)
-    router.mount("/user", user_router(_db))
+    router.mount("/user", user_router(db))
     router.finalize()
 
     server = Server(router)
@@ -96,7 +96,8 @@ def user_router(db: sqlite3.Connection) -> Router:
     router.patch("/{id}", update_user(db))
     return router
 
-def get_users(db: sqlite3.Connection) -> RSGIHTTPHandler:  # closure over handler to inject dependencies
+def get_users(db: sqlite3.Connection) -> RSGIHTTPHandler:
+    # closure over handler function to make db available within the handler
     async def handler(s: HTTPScope, p: HTTPProtocol) -> None:
         cur = db.cursor()
         cur.execute("SELECT * FROM user")
