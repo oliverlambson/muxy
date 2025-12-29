@@ -67,7 +67,7 @@ async def main() -> None:
 
     router.finalize()
 
-    server = Server(router)
+    server = Server(router, address=ADDRESS, port=PORT, log_access=True)
     try:
         await server.serve()
     except asyncio.CancelledError:
