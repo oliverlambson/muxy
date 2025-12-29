@@ -9,6 +9,7 @@ from muxy.tree import (
     Node,
     WildCardNode,
     _construct_route_tree,
+    _construct_sub_tree,
     _merge_trees,
     add_route,
     find_handler,
@@ -93,9 +94,27 @@ def test__merge_trees() -> None:
     assert tree == expected_tree
 
 
-@pytest.mark.xfail
 def test__construct_sub_tree() -> None:
-    raise NotImplementedError
+    user_profile_handler = lambda: "user_profile_handler"  # noqa: E731
+    child = Node(
+        wildcard=WildCardNode(
+            name="id",
+            child=Node(
+                children=FrozenDict(
+                    {
+                        "profile": Node(
+                            children=FrozenDict(
+                                {LeafKey.GET: Node(handler=user_profile_handler)}
+                            )
+                        )
+                    }
+                )
+            ),
+        )
+    )
+    expected_tree = Node(children=FrozenDict({"user": child}))
+    tree = _construct_sub_tree("/user", child)
+    assert tree == expected_tree
 
 
 def test__construct_route_tree() -> None:
