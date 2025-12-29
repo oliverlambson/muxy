@@ -61,12 +61,7 @@ from json.decoder import JSONDecodeError
 from granian.server.embed import Server
 
 from muxy import Router, path_params
-from muxy.rsgi import (
-    HTTPProtocol,
-    HTTPScope,
-    RSGIHTTPHandler,
-    Scope,
-)
+from muxy.rsgi import HTTPProtocol, HTTPScope, RSGIHTTPHandler
 
 
 async def main() -> None:
@@ -89,7 +84,7 @@ async def not_found(_scope: HTTPScope, proto: HTTPProtocol) -> None:
 async def method_not_allowed(_scope: HTTPScope, proto: HTTPProtocol) -> None:
     proto.response_str(404, [("Content-Type", "text/plain")], "Method not allowed")
 
-async def home(s: Scope, p: HTTPProtocol) -> None:
+async def home(s: HTTPScope, p: HTTPProtocol) -> None:
     p.response_str(200, [("Content-Type", "text/plain")], "Welcome home")
 
 
@@ -102,7 +97,7 @@ def user_router(db: sqlite3.Connection) -> Router:
     return router
 
 def get_users(db: sqlite3.Connection) -> RSGIHTTPHandler:  # closure over handler to inject dependencies
-    async def handler(s: Scope, p: HTTPProtocol) -> None:
+    async def handler(s: HTTPScope, p: HTTPProtocol) -> None:
         cur = db.cursor()
         cur.execute("SELECT * FROM user")
         result = cur.fetchall()
@@ -111,10 +106,27 @@ def get_users(db: sqlite3.Connection) -> RSGIHTTPHandler:  # closure over handle
 
     return handler
 
-def get_user(db: sqlite3.Connection) -> RSGIHTTPHandler: ...
+def get_user(db: sqlite3.Connection) -> RSGIHTTPHandler:
+    async def handler(s: Scope, p: HTTPProtocol) -> None:
+        cur = db.cursor()
+        user_id = path_params.get()["id"]
+        try:
+            user_id = int(user_id)
+        except ValueError:
+            p.response_str(404, [("Content-Type", "text/plain")], "Not found")
+            return
+        cur.execute("SELECT * FROM user WHERE id = ?", (user_id,))
+        result = cur.fetchone()
+        if result is None:
+            p.response_str(404, [("Content-Type", "text/plain")], "Not found")
+            return
+        serialized = json.dumps({"id": result[0], "name": result[1]})
+        p.response_str(200, [("Content-Type", "application/json")], serialized)
+
+    return handler
 
 def create_user(db: sqlite3.Connection) -> RSGIHTTPHandler:
-    async def handler(s: Scope, p: HTTPProtocol) -> None:
+    async def handler(s: HTTPScope, p: HTTPProtocol) -> None:
         cur = db.cursor()
         body = await p()
         try:

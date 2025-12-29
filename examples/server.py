@@ -19,12 +19,7 @@ from json.decoder import JSONDecodeError
 from granian.server.embed import Server
 
 from muxy import Router, path_params
-from muxy.rsgi import (
-    HTTPProtocol,
-    HTTPScope,
-    RSGIHTTPHandler,
-    Scope,
-)
+from muxy.rsgi import HTTPProtocol, HTTPScope, RSGIHTTPHandler
 
 ADDRESS = "127.0.0.1"
 PORT = 8000
@@ -68,7 +63,7 @@ async def method_not_allowed(_scope: HTTPScope, proto: HTTPProtocol) -> None:
     proto.response_str(404, [("Content-Type", "text/plain")], "Method not allowed")
 
 
-async def home(s: Scope, p: HTTPProtocol) -> None:
+async def home(s: HTTPScope, p: HTTPProtocol) -> None:
     p.response_str(200, [("Content-Type", "text/plain")], "Welcome home")
 
 
@@ -83,7 +78,7 @@ def user_router(db: sqlite3.Connection) -> Router:
 
 # closure over handler to inject dependencies
 def get_users(db: sqlite3.Connection) -> RSGIHTTPHandler:
-    async def handler(s: Scope, p: HTTPProtocol) -> None:
+    async def handler(s: HTTPScope, p: HTTPProtocol) -> None:
         cur = db.cursor()
         cur.execute("SELECT * FROM user")
         result = cur.fetchall()
@@ -94,7 +89,7 @@ def get_users(db: sqlite3.Connection) -> RSGIHTTPHandler:
 
 
 def get_user(db: sqlite3.Connection) -> RSGIHTTPHandler:
-    async def handler(s: Scope, p: HTTPProtocol) -> None:
+    async def handler(s: HTTPScope, p: HTTPProtocol) -> None:
         cur = db.cursor()
         user_id = path_params.get()["id"]
         try:
@@ -114,7 +109,7 @@ def get_user(db: sqlite3.Connection) -> RSGIHTTPHandler:
 
 
 def create_user(db: sqlite3.Connection) -> RSGIHTTPHandler:
-    async def handler(s: Scope, p: HTTPProtocol) -> None:
+    async def handler(s: HTTPScope, p: HTTPProtocol) -> None:
         cur = db.cursor()
         body = await p()
         try:
@@ -136,7 +131,7 @@ def create_user(db: sqlite3.Connection) -> RSGIHTTPHandler:
 
 
 def update_user(db: sqlite3.Connection) -> RSGIHTTPHandler:
-    async def handler(s: Scope, p: HTTPProtocol) -> None:
+    async def handler(s: HTTPScope, p: HTTPProtocol) -> None:
         cur = db.cursor()
         user_id = path_params.get()["id"]
         body = await p()
@@ -172,7 +167,7 @@ def product_router(db: sqlite3.Connection) -> Router:
 
 
 def get_products(db: sqlite3.Connection) -> RSGIHTTPHandler:
-    async def handler(s: Scope, p: HTTPProtocol) -> None:
+    async def handler(s: HTTPScope, p: HTTPProtocol) -> None:
         cur = db.cursor()
         cur.execute("SELECT * FROM product")
         result = cur.fetchall()
@@ -185,7 +180,7 @@ def get_products(db: sqlite3.Connection) -> RSGIHTTPHandler:
 def get_product(db: sqlite3.Connection) -> RSGIHTTPHandler:
     cur = db.cursor()
 
-    async def handler(s: Scope, p: HTTPProtocol) -> None:
+    async def handler(s: HTTPScope, p: HTTPProtocol) -> None:
         product_id = path_params.get()["id"]
         try:
             product_id = int(product_id)
@@ -204,7 +199,7 @@ def get_product(db: sqlite3.Connection) -> RSGIHTTPHandler:
 
 
 def create_product(db: sqlite3.Connection) -> RSGIHTTPHandler:
-    async def handler(s: Scope, p: HTTPProtocol) -> None:
+    async def handler(s: HTTPScope, p: HTTPProtocol) -> None:
         cur = db.cursor()
         body = await p()
         try:
