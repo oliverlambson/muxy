@@ -154,10 +154,15 @@ def find_handler[T](
     if leaf is None:
         leaf = current.children.get(LeafKey.ANY_HTTP)  # fallback to any method handler
         if leaf is None:
-            if current.method_not_allowed_handler is None:
-                msg = "No method not allowed handler set"
+            if any(isinstance(k, LeafKey) for k in current.children.keys()):
+                if current.method_not_allowed_handler is None:
+                    msg = "No method not allowed handler set"
+                    raise ValueError(msg)
+                return current.method_not_allowed_handler, (), params
+            if current.not_found_handler is None:
+                msg = "No not found handler set"
                 raise ValueError(msg)
-            return current.method_not_allowed_handler, (), params
+            return current.not_found_handler, (), {}
 
     if leaf.handler is None:
         if current.not_found_handler is None:

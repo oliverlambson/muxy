@@ -514,6 +514,8 @@ finalized_tree = Node(
         ("/some/nonexistent/route", LeafKey.GET, not_found_handler, (), {}),
         # 404 on trailing slash
         ("/admin/", LeafKey.GET, admin_not_found_handler, (), {}),
+        # 404 on route with no handlers
+        ("/admin/user/", LeafKey.GET, admin_not_found_handler, (), {}),
         # 405
         ("/admin", LeafKey.DELETE, method_not_allowed_handler, (), {}),
         # 405

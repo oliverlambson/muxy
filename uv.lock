@@ -22,7 +22,7 @@ wheels = [
 
 [[package]]
 name = "muxy"
-version = "0.1.0a2"
+version = "0.1.0a3"
 source = { editable = "." }
 
 [package.dev-dependencies]
