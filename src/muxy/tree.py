@@ -176,23 +176,17 @@ def add_route[T](
     middleware: tuple[Middleware[T], ...] = (),
 ) -> Node[T]:
     """add route to tree for handler on method/path with optional middleware"""
-    new_tree = construct_tree(method, path, handler, middleware)
+    new_tree = construct_route_tree(method, path, handler, middleware)
     return merge_trees(tree, new_tree)
 
 
-def construct_tree[T](
+def construct_route_tree[T](
     method: LeafKey,
     path: str,
     handler: T,
     middleware: tuple[Middleware[T], ...] = (),
 ) -> Node[T]:
     """construct tree for handler on method/path with optional middleware"""
-    if not path.startswith("/"):
-        msg = f"path must start with '/', provided {path=}"
-        raise ValueError(msg)
-    segments = path[1:].split("/")
-
-    # construct tree
     leaf = Node(
         middleware=middleware,
         handler=handler,
@@ -200,6 +194,17 @@ def construct_tree[T](
     child: Node[T] = Node(
         children=FrozenDict({method: leaf}),
     )
+    return construct_sub_tree(path, child)
+
+
+def construct_sub_tree[T](path: str, child: Node[T]) -> Node[T]:
+    """construct sub tree for existing node on path"""
+    if not path.startswith("/"):
+        msg = f"path must start with '/', provided {path=}"
+        raise ValueError(msg)
+    segments = path[1:].split("/")
+
+    # construct tree
     for seg in reversed(segments):
         if seg.startswith("{") and seg.endswith("...}"):
             name = seg[1:-4]

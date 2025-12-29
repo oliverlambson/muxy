@@ -25,7 +25,7 @@ from muxy.tree import (
     Node,
     WildCardNode,
     add_route,
-    construct_tree,
+    construct_route_tree,
     find_handler,
     merge_trees,
     path_params,
@@ -343,7 +343,9 @@ async def main() -> None:
     from pprint import pprint
 
     # test tree construction
-    tree = construct_tree(LeafKey.GET, "/user/{id}/profile", _test_user_profile_handler)
+    tree = construct_route_tree(
+        LeafKey.GET, "/user/{id}/profile", _test_user_profile_handler
+    )
     pprint(tree)
     handler, middleware, params = find_handler("/user/42/profile", LeafKey.GET, tree)
     wrapped_handler = reduce(lambda h, m: m(h), reversed(middleware), handler)
@@ -354,8 +356,8 @@ async def main() -> None:
     print()
 
     # test tree merging
-    tree1 = construct_tree(LeafKey.GET, "/user/{id}", _test_user_id_handler)
-    tree2 = construct_tree(
+    tree1 = construct_route_tree(LeafKey.GET, "/user/{id}", _test_user_id_handler)
+    tree2 = construct_route_tree(
         LeafKey.GET, "/user/{id}/profile", _test_user_profile_handler
     )
     tree = merge_trees(tree1, tree2)
@@ -373,7 +375,7 @@ async def main() -> None:
     print()
 
     # test add route
-    tree = construct_tree(LeafKey.GET, "/user/{id}", _test_user_id_handler)
+    tree = construct_route_tree(LeafKey.GET, "/user/{id}", _test_user_id_handler)
     tree = add_route(
         tree, LeafKey.GET, "/user/{id}/profile", _test_user_profile_handler
     )

@@ -17,7 +17,15 @@ from .rsgi import (
     WebsocketProtocol,
     WebsocketScope,
 )
-from .tree import LeafKey, Node, add_route, find_handler, path_params
+from .tree import (
+    LeafKey,
+    Node,
+    add_route,
+    construct_sub_tree,
+    find_handler,
+    merge_trees,
+    path_params,
+)
 
 # --- IMPLEMENTATION -----------------------------------------------------------
 type Middleware[T] = Callable[[T], T]
@@ -244,4 +252,8 @@ class Router:
 
     def mount(self, path: str, router: Router) -> None:
         """Merges in another router at path."""
-        raise NotImplementedError  # TODO: implementation
+        if path.endswith("/"):
+            msg = "mount path cannot end in /"
+            raise ValueError(msg)
+        sub_tree = construct_sub_tree(path, router._tree)
+        self._tree = merge_trees(self._tree, sub_tree)
