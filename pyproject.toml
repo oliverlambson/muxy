@@ -1,6 +1,6 @@
 [project]
 name = "muxy"
-version = "0.1.0.dev7"
+version = "0.1.0.dev8"
 description = "Zero-dependency router for building HTTP services."
 readme = "README.md"
 license = "MIT"
@@ -37,8 +37,8 @@ Changelog = "https://github.com/oliverlambson/muxy/blob/main/CHANGELOG.md"
 [dependency-groups]
 dev = [
     "pytest>=9.0.2,<10.0.0",
-    "ruff>=0.14.4,<1.0.0",
-    "ty>=0.0.7,<1.0.0",
+    "ruff>=0.14.10,<0.15.0",
+    "ty>=0.0.8,<0.0.9",
 ]
 
 [build-system]
