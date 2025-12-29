@@ -50,7 +50,7 @@ if __name__ == "__main__":
 
 **Bigger app**
 
-See [examples/server.py](examples/server.py) for a runnable script.
+See [examples/server.py](https://github.com/oliverlambson/muxy/blob/main/examples/server.py) for a runnable script.
 
 ```python
 import asyncio
