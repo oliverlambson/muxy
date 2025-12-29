@@ -22,6 +22,7 @@ from .tree import (
     Node,
     add_route,
     construct_sub_tree,
+    finalize_tree,
     find_handler,
     merge_trees,
     path_params,
@@ -257,3 +258,21 @@ class Router:
             raise ValueError(msg)
         sub_tree = construct_sub_tree(path, router._tree)
         self._tree = merge_trees(self._tree, sub_tree)
+
+    def finalize(self) -> None:
+        """
+        Cascades not_found_handler, method_not_allowed_handler, and middleware down
+        through the routing tree.
+        """
+        if self._tree.not_found_handler is None:
+            msg = "Router does not have not_found_handler"
+            raise ValueError(msg)
+        if self._tree.method_not_allowed_handler is None:
+            msg = "Router does not have method_not_allowed_handler"
+            raise ValueError(msg)
+        self._tree = finalize_tree(
+            self._tree,
+            self._tree.not_found_handler,
+            self._tree.method_not_allowed_handler,
+            self._tree.middleware,
+        )

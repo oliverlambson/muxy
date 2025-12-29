@@ -20,9 +20,9 @@ from granian.server.embed import Server
 from muxy.router import Router, path_params
 from muxy.rsgi import (
     HTTPProtocol,
+    HTTPScope,
     RSGIHTTPHandler,
     Scope,
-    HTTPScope,
 )
 
 ADDRESS = "127.0.0.1"
@@ -64,6 +64,8 @@ async def main() -> None:
     product_router.get("/{id}", get_product(_db))
 
     router.mount("/product", product_router)
+
+    router.finalize()
 
     server = Server(router)
     try:

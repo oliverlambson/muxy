@@ -308,9 +308,69 @@ def merge_trees[T](tree1: Node[T], tree2: Node[T]) -> Node[T]:
     )
 
 
-def finalize_tree[T](tree: Node[T]) -> Node[T]:
+def finalize_tree[T](
+    tree: Node[T],
+    not_found_handler: T,
+    method_not_allowed_handler: T,
+    middleware: tuple[Middleware[T], ...],
+) -> Node[T]:
     """
     cascade not_found_handler, method_not_allowed_handler, and middleware down
     through tree
     """
-    raise NotImplementedError  # TODO: implementation
+    if tree.not_found_handler is None:  # cascade default
+        tree = tree.update(not_found_handler=not_found_handler)
+    else:  # update default
+        not_found_handler = tree.not_found_handler
+
+    if tree.method_not_allowed_handler is None:  # cascade default
+        tree = tree.update(method_not_allowed_handler=method_not_allowed_handler)
+    else:  # update default
+        method_not_allowed_handler = tree.method_not_allowed_handler
+
+    if tree.middleware:
+        middleware += tree.middleware
+    if middleware:
+        tree = tree.update(middleware=middleware)
+
+    if tree.wildcard is not None:
+        tree = tree.update(
+            wildcard=WildCardNode(
+                name=tree.wildcard.name,
+                child=finalize_tree(
+                    tree.wildcard.child,
+                    not_found_handler,
+                    method_not_allowed_handler,
+                    middleware,
+                ),
+            )
+        )
+
+    if tree.catchall is not None:
+        tree = tree.update(
+            catchall=CatchAllNode(
+                name=tree.catchall.name,
+                child=finalize_tree(
+                    tree.catchall.child,
+                    not_found_handler,
+                    method_not_allowed_handler,
+                    middleware,
+                ),
+            )
+        )
+
+    tree = tree.update(
+        children=FrozenDict(
+            {
+                k: finalize_tree(
+                    child,
+                    not_found_handler,
+                    method_not_allowed_handler,
+                    middleware,
+                )
+                for k, child in tree.children.items()
+            }
+        )
+    )
+
+    return tree
