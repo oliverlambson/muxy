@@ -21,10 +21,9 @@ from .tree import (
     LeafKey,
     Node,
     add_route,
-    construct_sub_tree,
     finalize_tree,
     find_handler,
-    merge_trees,
+    mount_tree,
     path_params,
 )
 
@@ -256,8 +255,7 @@ class Router:
         if path.endswith("/"):
             msg = "mount path cannot end in /"
             raise ValueError(msg)
-        sub_tree = construct_sub_tree(path, router._tree)
-        self._tree = merge_trees(self._tree, sub_tree)
+        self._tree = mount_tree(path, self._tree, router._tree)
 
     def finalize(self) -> None:
         """

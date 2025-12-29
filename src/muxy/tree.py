@@ -176,136 +176,13 @@ def add_route[T](
     middleware: tuple[Middleware[T], ...] = (),
 ) -> Node[T]:
     """add route to tree for handler on method/path with optional middleware"""
-    new_tree = construct_route_tree(method, path, handler, middleware)
-    return merge_trees(tree, new_tree)
+    new_tree = _construct_route_tree(method, path, handler, middleware)
+    return _merge_trees(tree, new_tree)
 
 
-def construct_route_tree[T](
-    method: LeafKey,
-    path: str,
-    handler: T,
-    middleware: tuple[Middleware[T], ...] = (),
-) -> Node[T]:
-    """construct tree for handler on method/path with optional middleware"""
-    leaf = Node(
-        middleware=middleware,
-        handler=handler,
-    )
-    child: Node[T] = Node(
-        children=FrozenDict({method: leaf}),
-    )
-    return construct_sub_tree(path, child)
-
-
-def construct_sub_tree[T](path: str, child: Node[T]) -> Node[T]:
-    """construct sub tree for existing node on path"""
-    if not path.startswith("/"):
-        msg = f"path must start with '/', provided {path=}"
-        raise ValueError(msg)
-    segments = path[1:].split("/")
-
-    # construct tree
-    for seg in reversed(segments):
-        if seg.startswith("{") and seg.endswith("...}"):
-            name = seg[1:-4]
-            child = Node(
-                catchall=CatchAllNode(
-                    name=name,
-                    child=child,
-                ),
-            )
-        elif seg.startswith("{") and seg.endswith("}"):
-            name = seg[1:-1]
-            child = Node(
-                wildcard=WildCardNode(
-                    name=name,
-                    child=child,
-                ),
-            )
-        else:
-            child = Node(
-                children=FrozenDict({seg: child}),
-            )
-
-    return child
-
-
-def merge_trees[T](tree1: Node[T], tree2: Node[T]) -> Node[T]:
-    """merge tree1 and tree2, error on conflict"""
-    if (
-        tree1.handler is not None
-        and tree2.handler is not None
-        and tree1.handler is not tree2.handler
-    ):
-        msg = "nodes have conflicting handlers"
-        raise ValueError(msg)
-    handler = tree1.handler or tree2.handler
-    if (
-        tree1.not_found_handler is not None
-        and tree2.not_found_handler is not None
-        and tree1.not_found_handler is not tree2.not_found_handler
-    ):
-        msg = "nodes have conflicting not found handlers"
-        raise ValueError(msg)
-    not_found_handler = tree1.not_found_handler or tree2.not_found_handler
-    if (
-        tree1.method_not_allowed_handler is not None
-        and tree2.method_not_allowed_handler is not None
-        and tree1.method_not_allowed_handler is not tree2.method_not_allowed_handler
-    ):
-        msg = "nodes have conflicting method not allowed handlers"
-        raise ValueError(msg)
-    method_not_allowed_handler = (
-        tree1.method_not_allowed_handler or tree2.method_not_allowed_handler
-    )
-
-    if tree1.middleware != tree2.middleware:
-        msg = "nodes have conflicting middleware"
-        raise ValueError(msg)
-    middleware = tree1.middleware or tree2.middleware
-
-    if tree1.wildcard is not None and tree2.wildcard and tree2.wildcard is not None:
-        if tree1.wildcard.name != tree2.wildcard.name:
-            msg = "nodes have conflicting wildcards"
-            raise ValueError(msg)
-        wildcard: WildCardNode[T] | None = WildCardNode(
-            name=tree1.wildcard.name,
-            child=merge_trees(tree1.wildcard.child, tree2.wildcard.child),
-        )
-    else:
-        wildcard = tree1.wildcard or tree2.wildcard
-
-    if tree1.catchall is not None and tree2.catchall is not None:
-        if tree1.catchall.name != tree2.catchall.name:
-            msg = "nodes have conclicting catchalls"
-            raise ValueError(msg)
-        catchall: CatchAllNode[T] | None = CatchAllNode(
-            name=tree1.catchall.name,
-            child=merge_trees(tree1.catchall.child, tree2.catchall.child),
-        )
-    else:
-        catchall = tree1.catchall or tree2.catchall
-
-    tree1_keys = set(tree1.children.keys())
-    tree2_keys = set(tree2.children.keys())
-    unique_tree1_keys = tree1_keys.difference(tree2_keys)
-    unique_tree2_keys = tree2_keys.difference(tree1_keys)
-    common_keys = tree1_keys.intersection(tree2_keys)
-    children: FrozenDict[str | LeafKey, Node[T]] = FrozenDict(
-        {k: tree1.children[k] for k in unique_tree1_keys}
-        | {k: tree2.children[k] for k in unique_tree2_keys}
-        | {k: merge_trees(tree1.children[k], tree2.children[k]) for k in common_keys}
-    )
-
-    return Node(
-        handler=handler,
-        middleware=middleware,
-        children=children,
-        wildcard=wildcard,
-        catchall=catchall,
-        not_found_handler=not_found_handler,
-        method_not_allowed_handler=method_not_allowed_handler,
-    )
+def mount_tree[T](path: str, parent: Node[T], child: Node[T]) -> Node[T]:
+    sub_tree = _construct_sub_tree(path, child)
+    return _merge_trees(parent, sub_tree)
 
 
 def finalize_tree[T](
@@ -374,3 +251,131 @@ def finalize_tree[T](
     )
 
     return tree
+
+
+def _construct_route_tree[T](
+    method: LeafKey,
+    path: str,
+    handler: T,
+    middleware: tuple[Middleware[T], ...] = (),
+) -> Node[T]:
+    """construct tree for handler on method/path with optional middleware"""
+    leaf = Node(
+        middleware=middleware,
+        handler=handler,
+    )
+    child: Node[T] = Node(
+        children=FrozenDict({method: leaf}),
+    )
+    return _construct_sub_tree(path, child)
+
+
+def _construct_sub_tree[T](path: str, child: Node[T]) -> Node[T]:
+    """construct sub tree for existing node on path"""
+    if not path.startswith("/"):
+        msg = f"path must start with '/', provided {path=}"
+        raise ValueError(msg)
+    segments = path[1:].split("/")
+
+    # construct tree
+    for seg in reversed(segments):
+        if seg.startswith("{") and seg.endswith("...}"):
+            name = seg[1:-4]
+            child = Node(
+                catchall=CatchAllNode(
+                    name=name,
+                    child=child,
+                ),
+            )
+        elif seg.startswith("{") and seg.endswith("}"):
+            name = seg[1:-1]
+            child = Node(
+                wildcard=WildCardNode(
+                    name=name,
+                    child=child,
+                ),
+            )
+        else:
+            child = Node(
+                children=FrozenDict({seg: child}),
+            )
+
+    return child
+
+
+def _merge_trees[T](tree1: Node[T], tree2: Node[T]) -> Node[T]:
+    """merge tree1 and tree2, error on conflict"""
+    if (
+        tree1.handler is not None
+        and tree2.handler is not None
+        and tree1.handler is not tree2.handler
+    ):
+        msg = "nodes have conflicting handlers"
+        raise ValueError(msg)
+    handler = tree1.handler or tree2.handler
+    if (
+        tree1.not_found_handler is not None
+        and tree2.not_found_handler is not None
+        and tree1.not_found_handler is not tree2.not_found_handler
+    ):
+        msg = "nodes have conflicting not found handlers"
+        raise ValueError(msg)
+    not_found_handler = tree1.not_found_handler or tree2.not_found_handler
+    if (
+        tree1.method_not_allowed_handler is not None
+        and tree2.method_not_allowed_handler is not None
+        and tree1.method_not_allowed_handler is not tree2.method_not_allowed_handler
+    ):
+        msg = "nodes have conflicting method not allowed handlers"
+        raise ValueError(msg)
+    method_not_allowed_handler = (
+        tree1.method_not_allowed_handler or tree2.method_not_allowed_handler
+    )
+
+    if tree1.middleware != tree2.middleware:
+        msg = "nodes have conflicting middleware"
+        raise ValueError(msg)
+    middleware = tree1.middleware or tree2.middleware
+
+    if tree1.wildcard is not None and tree2.wildcard and tree2.wildcard is not None:
+        if tree1.wildcard.name != tree2.wildcard.name:
+            msg = "nodes have conflicting wildcards"
+            raise ValueError(msg)
+        wildcard: WildCardNode[T] | None = WildCardNode(
+            name=tree1.wildcard.name,
+            child=_merge_trees(tree1.wildcard.child, tree2.wildcard.child),
+        )
+    else:
+        wildcard = tree1.wildcard or tree2.wildcard
+
+    if tree1.catchall is not None and tree2.catchall is not None:
+        if tree1.catchall.name != tree2.catchall.name:
+            msg = "nodes have conclicting catchalls"
+            raise ValueError(msg)
+        catchall: CatchAllNode[T] | None = CatchAllNode(
+            name=tree1.catchall.name,
+            child=_merge_trees(tree1.catchall.child, tree2.catchall.child),
+        )
+    else:
+        catchall = tree1.catchall or tree2.catchall
+
+    tree1_keys = set(tree1.children.keys())
+    tree2_keys = set(tree2.children.keys())
+    unique_tree1_keys = tree1_keys.difference(tree2_keys)
+    unique_tree2_keys = tree2_keys.difference(tree1_keys)
+    common_keys = tree1_keys.intersection(tree2_keys)
+    children: FrozenDict[str | LeafKey, Node[T]] = FrozenDict(
+        {k: tree1.children[k] for k in unique_tree1_keys}
+        | {k: tree2.children[k] for k in unique_tree2_keys}
+        | {k: _merge_trees(tree1.children[k], tree2.children[k]) for k in common_keys}
+    )
+
+    return Node(
+        handler=handler,
+        middleware=middleware,
+        children=children,
+        wildcard=wildcard,
+        catchall=catchall,
+        not_found_handler=not_found_handler,
+        method_not_allowed_handler=method_not_allowed_handler,
+    )
