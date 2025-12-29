@@ -50,7 +50,6 @@ add-bounds = "major"
 
 [tool.pytest.ini_options]
 addopts = "--doctest-modules"
-asyncio_default_fixture_loop_scope = "function"
 
 [tool.ty.rules]
 unused-ignore-comment = "error"
