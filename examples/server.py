@@ -12,6 +12,7 @@ Fully functional web server using Granian + muxy Router.
 
 import asyncio
 import json
+import logging
 import sqlite3
 from json.decoder import JSONDecodeError
 
@@ -50,6 +51,8 @@ async def method_not_allowed(_scope: HTTPScope, proto: HTTPProtocol) -> None:
 
 
 async def main() -> None:
+    logging.basicConfig(level=logging.INFO)
+
     router = Router()
     router.not_found(not_found)
     router.method_not_allowed(method_not_allowed)
