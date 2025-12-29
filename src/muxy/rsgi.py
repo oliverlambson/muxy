@@ -60,12 +60,14 @@ type RSGI = RSGIHTTP | RSGIWebsocket
 
 @runtime_checkable
 class RSGIHTTPHandler(Protocol):
-    async def __call__(self, __scope: Scope, __proto: HTTPProtocol) -> None: ...
+    async def __call__(self, __scope: HTTPScope, __proto: HTTPProtocol) -> None: ...
 
 
 @runtime_checkable
 class RSGIWebsocketHandler(Protocol):
-    async def __call__(self, __scope: Scope, __proto: WebsocketProtocol) -> None: ...
+    async def __call__(
+        self, __scope: WebsocketScope, __proto: WebsocketProtocol
+    ) -> None: ...
 
 
 type RSGIHandler = RSGIHTTPHandler | RSGIWebsocketHandler
