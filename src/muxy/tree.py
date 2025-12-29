@@ -332,8 +332,8 @@ def _merge_trees[T](tree1: Node[T], tree2: Node[T]) -> Node[T]:
         tree1.method_not_allowed_handler or tree2.method_not_allowed_handler
     )
 
-    if tree1.middleware != tree2.middleware:
-        msg = "nodes have conflicting middleware"
+    if tree2.middleware and tree1.middleware != tree2.middleware:
+        msg = "node being merged in has conflicting middleware"
         raise ValueError(msg)
     middleware = tree1.middleware or tree2.middleware
 

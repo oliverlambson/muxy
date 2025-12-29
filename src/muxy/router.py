@@ -272,5 +272,5 @@ class Router:
             self._tree,
             self._tree.not_found_handler,
             self._tree.method_not_allowed_handler,
-            self._tree.middleware,
+            (),
         )
