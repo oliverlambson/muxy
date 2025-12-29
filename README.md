@@ -12,7 +12,7 @@ uv add muxy
 
 - **first-class router composition** - modularise your code by nesting routers with no overhead
 - **correct, efficient routing** - explicit route heirarchy so behaviour is always predictable
-- **lightweight** - the core router is little more than a simple datastructure
+- **lightweight** - the core router is little more than a simple datastructure and has no dependencies
 - **control** - control the full HTTP request/response cycle without digging through framework layers
 - **middleware** - apply common logic to path groups simply and clearly
 
