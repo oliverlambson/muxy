@@ -136,6 +136,7 @@ def create_user(db: sqlite3.Connection) -> RSGIHTTPHandler:
 
 def update_user(db: sqlite3.Connection) -> RSGIHTTPHandler: ...
 
+
 if __name__ == "__main__":
     asyncio.run(main())
 ```
