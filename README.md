@@ -32,15 +32,17 @@ import asyncio
 
 from granian.server.embed import Server
 from muxy.router import Router
+from muxy.rsgi import HTTPProtocol, HTTPScope
 
+async def home(s: HTTPScope, p: HTTPProtocol) -> None:
+    p.response_str(200, [], "Hello world!")
 
 async def main() -> None:
     router = Router()
-    router.get("/", lambda _, p: p.response_str(200, [], "Hello world!"))
+    router.get("/", home)
 
     server = Server(router)
     await server.serve()
-
 
 if __name__ == "__main__":
     asyncio.run(main())
