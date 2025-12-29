@@ -47,3 +47,95 @@ async def main() -> None:
 if __name__ == "__main__":
     asyncio.run(main())
 ```
+
+**Bigger app**
+
+See [examples/server.py](examples/server.py) for a runnable script.
+
+```python
+import asyncio
+import json
+import sqlite3
+from json.decoder import JSONDecodeError
+
+from granian.server.embed import Server
+
+from muxy import Router, path_params
+from muxy.rsgi import (
+    HTTPProtocol,
+    HTTPScope,
+    RSGIHTTPHandler,
+    Scope,
+)
+
+
+async def main() -> None:
+    _db = sqlite3.connect(":memory:")
+
+    router = Router()
+    router.not_found(not_found)
+    router.method_not_allowed(method_not_allowed)
+    router.get("/", home)
+    router.mount("/user", user_router(_db))
+    router.finalize()
+
+    server = Server(router)
+    await server.serve()
+
+
+async def not_found(_scope: HTTPScope, proto: HTTPProtocol) -> None:
+    proto.response_str(404, [("Content-Type", "text/plain")], "Not found")
+
+async def method_not_allowed(_scope: HTTPScope, proto: HTTPProtocol) -> None:
+    proto.response_str(404, [("Content-Type", "text/plain")], "Method not allowed")
+
+async def home(s: Scope, p: HTTPProtocol) -> None:
+    p.response_str(200, [("Content-Type", "text/plain")], "Welcome home")
+
+
+def user_router(db: sqlite3.Connection) -> Router:
+    router = Router()
+    router.get("/", get_users(db))
+    router.get("/{id}", get_user(db))
+    router.post("/", create_user(db))
+    router.patch("/{id}", update_user(db))
+    return router
+
+def get_users(db: sqlite3.Connection) -> RSGIHTTPHandler:  # closure over handler to inject dependencies
+    async def handler(s: Scope, p: HTTPProtocol) -> None:
+        cur = db.cursor()
+        cur.execute("SELECT * FROM user")
+        result = cur.fetchall()
+        serialized = json.dumps([{"id": row[0], "name": row[1]} for row in result])
+        p.response_str(200, [], serialized)
+
+    return handler
+
+def get_user(db: sqlite3.Connection) -> RSGIHTTPHandler: ...
+
+def create_user(db: sqlite3.Connection) -> RSGIHTTPHandler:
+    async def handler(s: Scope, p: HTTPProtocol) -> None:
+        cur = db.cursor()
+        body = await p()
+        try:
+            payload = json.loads(body)
+        except JSONDecodeError:
+            p.response_str(422, [("Content-Type", "text/plain")], "Invalid json")
+            return
+        try:
+            name = payload["name"]
+        except KeyError:
+            p.response_str(422, [("Content-Type", "text/plain")], "No name key")
+            return
+        cur.execute("INSERT INTO user (name) VALUES (?) RETURNING *", (name,))
+        result = cur.fetchone()
+        serialized = json.dumps({"id": result[0], "name": result[1]})
+        p.response_str(201, [("Content-Type", "application/json")], serialized)
+
+    return handler
+
+def update_user(db: sqlite3.Connection) -> RSGIHTTPHandler: ...
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```

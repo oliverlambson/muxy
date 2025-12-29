@@ -42,32 +42,15 @@ CREATE TABLE IF NOT EXISTS product (
 """)
 
 
-async def not_found(_scope: HTTPScope, proto: HTTPProtocol) -> None:
-    proto.response_str(404, [], "Not found")
-
-
-async def method_not_allowed(_scope: HTTPScope, proto: HTTPProtocol) -> None:
-    proto.response_str(404, [], "Method not allowed")
-
-
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
 
     router = Router()
     router.not_found(not_found)
     router.method_not_allowed(method_not_allowed)
-    router.get("/user/{id}", get_user(_db))
-    router.get("/user/", get_users(_db))
-    router.post("/user/", create_user(_db))
-    router.patch("/user/{id}", update_user(_db))
-
-    product_router = Router()
-    product_router.get("/", get_products(_db))
-    product_router.post("/", create_product(_db))
-    product_router.get("/{id}", get_product(_db))
-
-    router.mount("/product", product_router)
-
+    router.get("/", home)
+    router.mount("/user", user_router(_db))
+    router.mount("/product", product_router(_db))
     router.finalize()
 
     server = Server(router, address=ADDRESS, port=PORT, log_access=True)
@@ -77,6 +60,27 @@ async def main() -> None:
         pass
 
 
+async def not_found(_scope: HTTPScope, proto: HTTPProtocol) -> None:
+    proto.response_str(404, [("Content-Type", "text/plain")], "Not found")
+
+
+async def method_not_allowed(_scope: HTTPScope, proto: HTTPProtocol) -> None:
+    proto.response_str(404, [("Content-Type", "text/plain")], "Method not allowed")
+
+
+async def home(s: Scope, p: HTTPProtocol) -> None:
+    p.response_str(200, [("Content-Type", "text/plain")], "Welcome home")
+
+
+def user_router(db: sqlite3.Connection) -> Router:
+    router = Router()
+    router.get("/", get_users(db))
+    router.get("/{id}", get_user(db))
+    router.post("/", create_user(db))
+    router.patch("/{id}", update_user(db))
+    return router
+
+
 # closure over handler to inject dependencies
 def get_users(db: sqlite3.Connection) -> RSGIHTTPHandler:
     async def handler(s: Scope, p: HTTPProtocol) -> None:
@@ -84,7 +88,7 @@ def get_users(db: sqlite3.Connection) -> RSGIHTTPHandler:
         cur.execute("SELECT * FROM user")
         result = cur.fetchall()
         serialized = json.dumps([{"id": row[0], "name": row[1]} for row in result])
-        p.response_str(200, [], serialized)
+        p.response_str(200, [("Content-Type", "application/json")], serialized)
 
     return handler
 
@@ -96,15 +100,15 @@ def get_user(db: sqlite3.Connection) -> RSGIHTTPHandler:
         try:
             user_id = int(user_id)
         except ValueError:
-            p.response_empty(404, [])
+            p.response_str(404, [("Content-Type", "text/plain")], "Not found")
             return
         cur.execute("SELECT * FROM user WHERE id = ?", (user_id,))
         result = cur.fetchone()
         if result is None:
-            p.response_empty(404, [])
+            p.response_str(404, [("Content-Type", "text/plain")], "Not found")
             return
         serialized = json.dumps({"id": result[0], "name": result[1]})
-        p.response_str(200, [], serialized)
+        p.response_str(200, [("Content-Type", "application/json")], serialized)
 
     return handler
 
@@ -116,17 +120,17 @@ def create_user(db: sqlite3.Connection) -> RSGIHTTPHandler:
         try:
             payload = json.loads(body)
         except JSONDecodeError:
-            p.response_empty(422, [])
+            p.response_str(422, [("Content-Type", "text/plain")], "Invalid json")
             return
         try:
             name = payload["name"]
         except KeyError:
-            p.response_empty(422, [])
+            p.response_str(422, [("Content-Type", "text/plain")], "Missing name")
             return
         cur.execute("INSERT INTO user (name) VALUES (?) RETURNING *", (name,))
         result = cur.fetchone()
         serialized = json.dumps({"id": result[0], "name": result[1]})
-        p.response_str(201, [], serialized)
+        p.response_str(201, [("Content-Type", "application/json")], serialized)
 
     return handler
 
@@ -139,24 +143,32 @@ def update_user(db: sqlite3.Connection) -> RSGIHTTPHandler:
         try:
             payload = json.loads(body)
         except JSONDecodeError:
-            p.response_empty(422, [])
+            p.response_str(422, [("Content-Type", "text/plain")], "Invalid json")
             return
         try:
             name = payload["name"]
         except KeyError:
-            p.response_empty(422, [])
+            p.response_str(422, [("Content-Type", "text/plain")], "Missing name")
             return
         cur.execute(
             "UPDATE user SET name = ? WHERE id = ? RETURNING *", (name, user_id)
         )
         result = cur.fetchone()
         if result is None:
-            p.response_empty(422, [])
+            p.response_str(404, [("Content-Type", "text/plain")], "Not found")
             return
         serialized = json.dumps({"id": result[0], "name": result[1]})
-        p.response_str(201, [], serialized)
+        p.response_str(201, [("Content-Type", "application/json")], serialized)
 
     return handler
+
+
+def product_router(db: sqlite3.Connection) -> Router:
+    router = Router()
+    router.get("/", get_products(_db))
+    router.post("/", create_product(_db))
+    router.get("/{id}", get_product(_db))
+    return router
 
 
 def get_products(db: sqlite3.Connection) -> RSGIHTTPHandler:
@@ -165,7 +177,7 @@ def get_products(db: sqlite3.Connection) -> RSGIHTTPHandler:
         cur.execute("SELECT * FROM product")
         result = cur.fetchall()
         serialized = json.dumps([{"id": row[0], "name": row[1]} for row in result])
-        p.response_str(200, [], serialized)
+        p.response_str(200, [("Content-Type", "application/json")], serialized)
 
     return handler
 
@@ -178,15 +190,15 @@ def get_product(db: sqlite3.Connection) -> RSGIHTTPHandler:
         try:
             product_id = int(product_id)
         except ValueError:
-            p.response_empty(404, [])
+            p.response_str(404, [("Content-Type", "text/plain")], "Not found")
             return
         cur.execute("SELECT * FROM product WHERE id = ?", (product_id,))
         result = cur.fetchone()
         if result is None:
-            p.response_empty(404, [])
+            p.response_str(404, [("Content-Type", "text/plain")], "Not found")
             return
         serialized = json.dumps({"id": result[0], "name": result[1]})
-        p.response_str(200, [], serialized)
+        p.response_str(200, [("Content-Type", "application/json")], serialized)
 
     return handler
 
@@ -198,17 +210,17 @@ def create_product(db: sqlite3.Connection) -> RSGIHTTPHandler:
         try:
             payload = json.loads(body)
         except JSONDecodeError:
-            p.response_empty(422, [])
+            p.response_str(422, [("Content-Type", "text/plain")], "Invalid json")
             return
         try:
             name = payload["name"]
         except KeyError:
-            p.response_empty(422, [])
+            p.response_str(422, [("Content-Type", "text/plain")], "Missing name")
             return
         cur.execute("INSERT INTO product (name) VALUES (?) RETURNING *", (name,))
         result = cur.fetchone()
         serialized = json.dumps({"id": result[0], "name": result[1]})
-        p.response_str(201, [], serialized)
+        p.response_str(201, [("Content-Type", "application/json")], serialized)
 
     return handler
 
