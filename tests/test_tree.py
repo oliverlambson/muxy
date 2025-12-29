@@ -10,6 +10,7 @@ from muxy.tree import (
     WildCardNode,
     _construct_route_tree,
     _merge_trees,
+    add_route,
     find_handler,
 )
 
@@ -141,9 +142,56 @@ def test_mount_tree() -> None:
     raise NotImplementedError
 
 
-@pytest.mark.xfail
 def test_add_route() -> None:
-    raise NotImplementedError
+    user_id_handler = lambda: "user_id_handler"  # noqa: E731
+    user_profile_handler = lambda: "user_profile_handler"  # noqa: E731
+    tree1 = Node(
+        children=FrozenDict(
+            {
+                "user": Node(
+                    wildcard=WildCardNode(
+                        name="id",
+                        child=Node(
+                            children=FrozenDict(
+                                {
+                                    LeafKey.GET: Node(handler=user_id_handler),
+                                }
+                            )
+                        ),
+                    )
+                )
+            }
+        )
+    )
+    tree = add_route(tree1, LeafKey.GET, "/user/{id}/profile", user_profile_handler)
+    expected_tree = Node(
+        children=FrozenDict(
+            {
+                "user": Node(
+                    wildcard=WildCardNode(
+                        name="id",
+                        child=Node(
+                            children=FrozenDict(
+                                {
+                                    LeafKey.GET: Node(handler=user_id_handler),
+                                    "profile": Node(
+                                        children=FrozenDict(
+                                            {
+                                                LeafKey.GET: Node(
+                                                    handler=user_profile_handler
+                                                )
+                                            }
+                                        )
+                                    ),
+                                }
+                            )
+                        ),
+                    )
+                )
+            }
+        )
+    )
+    assert tree == expected_tree
 
 
 """
