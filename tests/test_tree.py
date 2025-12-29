@@ -12,6 +12,7 @@ from muxy.tree import (
     _construct_sub_tree,
     _merge_trees,
     add_route,
+    finalize_tree,
     find_handler,
 )
 
@@ -151,9 +152,14 @@ def test__construct_route_tree() -> None:
     assert tree == expected_tree
 
 
-@pytest.mark.xfail
 def test_finalize_tree() -> None:
-    raise NotImplementedError
+    tree = finalize_tree(
+        unfinalized_tree,
+        not_found_handler=not_found_handler,
+        method_not_allowed_handler=method_not_allowed_handler,
+        middleware=(),
+    )
+    assert tree == finalized_tree
 
 
 @pytest.mark.xfail
@@ -250,8 +256,82 @@ admin_middleware = lambda s: s + ".admin_middleware"  # noqa: E731
 admin_user_middleware = lambda s: s + ".admin_user_middleware"  # noqa: E731
 admin_user_rename_middleware = lambda s: s + ".admin_user_rename_middleware"  # noqa: E731
 
-# good, finalized tree
-tree = Node(
+unfinalized_tree = Node(
+    children=FrozenDict(
+        {
+            "admin": Node(
+                children=FrozenDict(
+                    {
+                        LeafKey.GET: Node(handler=admin_home_handler),
+                        "user": Node(
+                            wildcard=WildCardNode(
+                                name="id",
+                                child=Node(
+                                    children=FrozenDict(
+                                        {
+                                            "rename": Node(
+                                                children=FrozenDict(
+                                                    {
+                                                        LeafKey.POST: Node(
+                                                            handler=admin_user_rename_handler,
+                                                            middleware=(
+                                                                admin_user_rename_middleware,
+                                                            ),
+                                                        ),
+                                                    }
+                                                ),
+                                            ),
+                                            "transaction": Node(
+                                                wildcard=WildCardNode(
+                                                    name="tx",
+                                                    child=Node(
+                                                        children=FrozenDict(
+                                                            {
+                                                                LeafKey.GET: Node(
+                                                                    handler=admin_user_transaction_view_handler
+                                                                ),
+                                                            }
+                                                        ),
+                                                    ),
+                                                ),
+                                            ),
+                                        }
+                                    ),
+                                ),
+                            ),
+                            middleware=(admin_user_middleware,),
+                        ),
+                    }
+                ),
+                not_found_handler=admin_not_found_handler,
+                middleware=(admin_middleware,),
+            ),
+            "static": Node(
+                catchall=CatchAllNode(
+                    name="path",
+                    child=Node(
+                        children=FrozenDict(
+                            {
+                                LeafKey.GET: Node(handler=static_handler),
+                            }
+                        ),
+                    ),
+                ),
+                method_not_allowed_handler=static_method_not_allowed_handler,
+            ),
+            "": Node(  # "" is trailing slash (because result of "/foo/".split("/") == ["foo", ""])
+                children=FrozenDict(
+                    {
+                        LeafKey.ANY_HTTP: Node(
+                            handler=home_handler,
+                        ),
+                    }
+                ),
+            ),
+        }
+    ),
+)
+finalized_tree = Node(
     children=FrozenDict(
         {
             "admin": Node(
@@ -453,7 +533,7 @@ def test_find_handler(
     expected_middleware: tuple[Callable[[Callable[[], None]], Callable[[], None]], ...],
     expected_params: dict[str, str],
 ) -> None:
-    handler, middleware, params = find_handler(path, method, tree)
+    handler, middleware, params = find_handler(path, method, finalized_tree)
     assert handler is expected_handler
     assert middleware == expected_middleware
     assert params == expected_params
