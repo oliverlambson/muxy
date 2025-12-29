@@ -8,6 +8,7 @@ from muxy.tree import (
     LeafKey,
     Node,
     WildCardNode,
+    _construct_route_tree,
     find_handler,
 )
 
@@ -22,9 +23,38 @@ def test__construct_sub_tree() -> None:
     raise NotImplementedError
 
 
-@pytest.mark.xfail
 def test__construct_route_tree() -> None:
-    raise NotImplementedError
+    user_profile_handler = lambda: "user_profile_handler"  # noqa: E731
+    tree = _construct_route_tree(
+        LeafKey.GET, "/user/{id}/profile", user_profile_handler
+    )
+    expected_tree = Node(
+        children=FrozenDict(
+            {
+                "user": Node(
+                    wildcard=WildCardNode(
+                        name="id",
+                        child=Node(
+                            children=FrozenDict(
+                                {
+                                    "profile": Node(
+                                        children=FrozenDict(
+                                            {
+                                                LeafKey.GET: Node(
+                                                    handler=user_profile_handler
+                                                )
+                                            }
+                                        )
+                                    )
+                                }
+                            )
+                        ),
+                    )
+                )
+            }
+        )
+    )
+    assert tree == expected_tree
 
 
 @pytest.mark.xfail
