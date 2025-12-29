@@ -8,8 +8,8 @@
 # ///
 """RSGI app demo.
 
-Shows implementation of an RSGI app, runs it with Granian, and successfully sends HTTP
-and Websocket requests to that running webserver.
+Shows implementation of a pure RSGI app, runs it with Granian, and successfully
+sends HTTP and Websocket requests to that running webserver.
 """
 
 import asyncio
