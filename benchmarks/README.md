@@ -47,11 +47,11 @@ DURATION=30 CONNECTIONS=200 RUNS=5 ./scripts/bench.sh
 
 ## Results
 
-| Metric       | muxy    | starlette | fastapi | vs starlette | vs fastapi |
-| ------------ | ------- | --------- | ------- | ------------ | ---------- |
-| Requests/sec | 168,895 | 51,607    | 30,196  | -69.4%       | -82.1%     |
-| Latency p50  | 0.53ms  | 1.85ms    | 3.04ms  | -249.1%      | -473.6%    |
-| Latency p99  | 0.79ms  | 2.33ms    | 3.97ms  | -194.9%      | -402.5%    |
+|               | Requests/sec   | Latency p50   | Latency p99   |
+| ------------- | -------------- | ------------- | ------------- |
+| **muxy**      | 168,895 (100%) | 0.53ms (100%) | 0.79ms (100%) |
+| **starlette** | 51,607 (31%)   | 1.85ms (349%) | 2.33ms (295%) |
+| **fastapi**   | 30,196 (18%)   | 3.04ms (574%) | 3.97ms (503%) |
 
 <details>
 <summary>Benchmark details</summary>

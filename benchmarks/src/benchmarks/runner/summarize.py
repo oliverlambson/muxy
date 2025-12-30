@@ -24,21 +24,12 @@ def get_median(runs: list[dict], key: str) -> float:
     return statistics.median(values)
 
 
-def format_delta(
-    baseline_val: float, compare_val: float, *, lower_is_better: bool = False
-) -> str:
-    """Format delta as percentage with +/- sign (comparing against baseline)."""
+def format_relative(baseline_val: float, compare_val: float) -> str:
+    """Format value as percentage relative to baseline."""
     if baseline_val == 0:
         return "N/A"
-
-    # For "lower is better" metrics, flip the comparison
-    if lower_is_better:
-        delta = ((baseline_val - compare_val) / baseline_val) * 100
-    else:
-        delta = ((compare_val - baseline_val) / baseline_val) * 100
-
-    sign = "+" if delta > 0 else ""
-    return f"{sign}{delta:.1f}%"
+    pct = (compare_val / baseline_val) * 100
+    return f"{pct:.0f}%"
 
 
 def extract_stats(results: dict) -> dict:
@@ -74,9 +65,9 @@ def print_terminal(stats: dict) -> None:
     baseline = frameworks[BASELINE]
 
     print()
-    print("=" * 80)
-    print("  muxy vs starlette vs fastapi benchmark results")
-    print("=" * 80)
+    print("=" * 70)
+    print("  Benchmark Results")
+    print("=" * 70)
     print()
 
     date = datetime.fromisoformat(metadata["timestamp"]).date()
@@ -91,62 +82,25 @@ def print_terminal(stats: dict) -> None:
     print(f"  Connections: {metadata['connections']}, Threads: {metadata['threads']}")
     print()
 
-    print("-" * 80)
-    header = f"  {'Metric':<17}"
+    print("-" * 70)
+    print(f"  {'':<12} {'Requests/sec':>17} {'Latency p50':>17} {'Latency p99':>17}")
+    print("-" * 70)
+
     for fw in FRAMEWORKS:
-        if fw in frameworks:
-            header += f" {fw:>12}"
-    header += " {'vs starlette':>14} {'vs fastapi':>12}"
-    print(
-        f"  {'Metric':<17} {'muxy':>12} {'starlette':>12} {'fastapi':>12} {'vs star':>10} {'vs fast':>10}"
-    )
-    print("-" * 80)
+        if fw not in frameworks:
+            continue
+        data = frameworks[fw]
+        rps_pct = format_relative(baseline["rps"], data["rps"])
+        p50_pct = format_relative(baseline["p50"], data["p50"])
+        p99_pct = format_relative(baseline["p99"], data["p99"])
 
-    # RPS row
-    rps_vals = [
-        f"{frameworks[fw]['rps']:>12,.0f}" for fw in FRAMEWORKS if fw in frameworks
-    ]
-    star_delta = format_delta(baseline["rps"], frameworks["starlette"]["rps"])
-    fast_delta = format_delta(baseline["rps"], frameworks["fastapi"]["rps"])
-    print(
-        f"  {'Requests/sec':<17} {' '.join(rps_vals)} {star_delta:>10} {fast_delta:>10}"
-    )
+        rps_str = f"{data['rps']:,.0f} ({rps_pct})"
+        p50_str = f"{data['p50']:.2f}ms ({p50_pct})"
+        p99_str = f"{data['p99']:.2f}ms ({p99_pct})"
 
-    # p50 row
-    p50_vals = [
-        f"{frameworks[fw]['p50']:>12,.2f}" for fw in FRAMEWORKS if fw in frameworks
-    ]
-    star_delta = format_delta(
-        baseline["p50"], frameworks["starlette"]["p50"], lower_is_better=True
-    )
-    fast_delta = format_delta(
-        baseline["p50"], frameworks["fastapi"]["p50"], lower_is_better=True
-    )
-    print(
-        f"  {'Latency p50 (ms)':<17} {' '.join(p50_vals)} {star_delta:>10} {fast_delta:>10}"
-    )
+        print(f"  {fw:<12} {rps_str:>17} {p50_str:>17} {p99_str:>17}")
 
-    # p99 row
-    p99_vals = [
-        f"{frameworks[fw]['p99']:>12,.2f}" for fw in FRAMEWORKS if fw in frameworks
-    ]
-    star_delta = format_delta(
-        baseline["p99"], frameworks["starlette"]["p99"], lower_is_better=True
-    )
-    fast_delta = format_delta(
-        baseline["p99"], frameworks["fastapi"]["p99"], lower_is_better=True
-    )
-    print(
-        f"  {'Latency p99 (ms)':<17} {' '.join(p99_vals)} {star_delta:>10} {fast_delta:>10}"
-    )
-
-    # Total requests row
-    req_vals = [
-        f"{frameworks[fw]['requests']:>12,}" for fw in FRAMEWORKS if fw in frameworks
-    ]
-    print(f"  {'Total requests':<17} {' '.join(req_vals)}")
-
-    print("-" * 80)
+    print("-" * 70)
 
     print()
     print("  Individual runs (rps):")
@@ -175,38 +129,34 @@ def format_markdown(stats: dict) -> str:
     system = metadata["system"]
     baseline = frameworks[BASELINE]
 
-    star_rps_delta = format_delta(baseline["rps"], frameworks["starlette"]["rps"])
-    fast_rps_delta = format_delta(baseline["rps"], frameworks["fastapi"]["rps"])
-    star_p50_delta = format_delta(
-        baseline["p50"], frameworks["starlette"]["p50"], lower_is_better=True
-    )
-    fast_p50_delta = format_delta(
-        baseline["p50"], frameworks["fastapi"]["p50"], lower_is_better=True
-    )
-    star_p99_delta = format_delta(
-        baseline["p99"], frameworks["starlette"]["p99"], lower_is_better=True
-    )
-    fast_p99_delta = format_delta(
-        baseline["p99"], frameworks["fastapi"]["p99"], lower_is_better=True
-    )
-
-    muxy = frameworks["muxy"]
-    starlette = frameworks["starlette"]
-    fastapi = frameworks["fastapi"]
-
     lines = [
         "## Results",
         "",
-        "| Metric       | muxy    | starlette | fastapi | vs starlette | vs fastapi |",
-        "| ------------ | ------- | --------- | ------- | ------------ | ---------- |",
-        f"| Requests/sec | {muxy['rps']:,.0f} | {starlette['rps']:,.0f} | {fastapi['rps']:,.0f} | {star_rps_delta} | {fast_rps_delta} |",
-        f"| Latency p50  | {muxy['p50']:.2f}ms | {starlette['p50']:.2f}ms | {fastapi['p50']:.2f}ms | {star_p50_delta} | {fast_p50_delta} |",
-        f"| Latency p99  | {muxy['p99']:.2f}ms | {starlette['p99']:.2f}ms | {fastapi['p99']:.2f}ms | {star_p99_delta} | {fast_p99_delta} |",
-        "",
-        "<details>",
-        "<summary>Benchmark details</summary>",
-        "",
+        "|     | Requests/sec | Latency p50 | Latency p99 |",
+        "| --- | ------------ | ----------- | ----------- |",
     ]
+
+    for fw in FRAMEWORKS:
+        if fw not in frameworks:
+            continue
+        data = frameworks[fw]
+        rps_pct = format_relative(baseline["rps"], data["rps"])
+        p50_pct = format_relative(baseline["p50"], data["p50"])
+        p99_pct = format_relative(baseline["p99"], data["p99"])
+
+        lines.append(
+            f"| **{fw}** | {data['rps']:,.0f} ({rps_pct}) | "
+            f"{data['p50']:.2f}ms ({p50_pct}) | {data['p99']:.2f}ms ({p99_pct}) |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "<details>",
+            "<summary>Benchmark details</summary>",
+            "",
+        ]
+    )
 
     date = datetime.fromisoformat(metadata["timestamp"]).date()
     lines.extend([f"**Date**: {date}", ""])
