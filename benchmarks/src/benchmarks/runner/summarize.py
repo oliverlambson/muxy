@@ -8,6 +8,9 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+FRAMEWORKS = ["muxy", "starlette", "fastapi"]
+BASELINE = "muxy"
+
 
 def load_results(path: Path) -> dict:
     """Load benchmark results from JSON file."""
@@ -22,16 +25,17 @@ def get_median(runs: list[dict], key: str) -> float:
 
 
 def format_delta(
-    muxy_val: float, starlette_val: float, *, lower_is_better: bool = False
+    baseline_val: float, compare_val: float, *, lower_is_better: bool = False
 ) -> str:
-    """Format delta as percentage with +/- sign."""
-    if starlette_val == 0:
+    """Format delta as percentage with +/- sign (comparing against baseline)."""
+    if baseline_val == 0:
         return "N/A"
 
+    # For "lower is better" metrics, flip the comparison
     if lower_is_better:
-        delta = ((muxy_val - starlette_val) / starlette_val) * 100
+        delta = ((baseline_val - compare_val) / baseline_val) * 100
     else:
-        delta = ((muxy_val - starlette_val) / starlette_val) * 100
+        delta = ((compare_val - baseline_val) / baseline_val) * 100
 
     sign = "+" if delta > 0 else ""
     return f"{sign}{delta:.1f}%"
@@ -40,42 +44,39 @@ def format_delta(
 def extract_stats(results: dict) -> dict:
     """Extract statistics from results."""
     metadata = results["metadata"]
-    muxy_runs = results["results"]["muxy"]
-    starlette_runs = results["results"]["starlette"]
+    stats = {"metadata": metadata, "frameworks": {}}
 
-    return {
-        "metadata": metadata,
-        "targets_count": muxy_runs[0]["targets_count"],
-        "muxy": {
-            "rps": get_median(muxy_runs, "rps"),
-            "p50": get_median(muxy_runs, "latency_p50_ms"),
-            "p99": get_median(muxy_runs, "latency_p99_ms"),
-            "requests": int(get_median(muxy_runs, "requests")),
-            "runs": muxy_runs,
-            "errors": sum(r["errors"] for r in muxy_runs),
-        },
-        "starlette": {
-            "rps": get_median(starlette_runs, "rps"),
-            "p50": get_median(starlette_runs, "latency_p50_ms"),
-            "p99": get_median(starlette_runs, "latency_p99_ms"),
-            "requests": int(get_median(starlette_runs, "requests")),
-            "runs": starlette_runs,
-            "errors": sum(r["errors"] for r in starlette_runs),
-        },
-    }
+    for fw in FRAMEWORKS:
+        if fw not in results["results"]:
+            continue
+        runs = results["results"][fw]
+        stats["frameworks"][fw] = {
+            "rps": get_median(runs, "rps"),
+            "p50": get_median(runs, "latency_p50_ms"),
+            "p99": get_median(runs, "latency_p99_ms"),
+            "requests": int(get_median(runs, "requests")),
+            "runs": runs,
+            "errors": sum(r["errors"] for r in runs),
+        }
+
+    # Get targets count from first available framework
+    first_fw = next(iter(stats["frameworks"]))
+    stats["targets_count"] = results["results"][first_fw][0]["targets_count"]
+
+    return stats
 
 
 def print_terminal(stats: dict) -> None:
     """Print formatted comparison summary to terminal."""
     metadata = stats["metadata"]
-    muxy = stats["muxy"]
-    starlette = stats["starlette"]
+    frameworks = stats["frameworks"]
     system = metadata["system"]
+    baseline = frameworks[BASELINE]
 
     print()
-    print("=" * 60)
-    print("  muxy vs starlette benchmark results")
-    print("=" * 60)
+    print("=" * 80)
+    print("  muxy vs starlette vs fastapi benchmark results")
+    print("=" * 80)
     print()
 
     date = datetime.fromisoformat(metadata["timestamp"]).date()
@@ -90,39 +91,79 @@ def print_terminal(stats: dict) -> None:
     print(f"  Connections: {metadata['connections']}, Threads: {metadata['threads']}")
     print()
 
-    print("-" * 60)
-    print(f"  {'Metric':<17} {'muxy':>12} {'starlette':>12} {'delta':>12}")
-    print("-" * 60)
-
-    rps_delta = format_delta(muxy["rps"], starlette["rps"])
+    print("-" * 80)
+    header = f"  {'Metric':<17}"
+    for fw in FRAMEWORKS:
+        if fw in frameworks:
+            header += f" {fw:>12}"
+    header += " {'vs starlette':>14} {'vs fastapi':>12}"
     print(
-        f"  {'Requests/sec':<17} {muxy['rps']:>12,.0f} {starlette['rps']:>12,.0f} {rps_delta:>12}"
+        f"  {'Metric':<17} {'muxy':>12} {'starlette':>12} {'fastapi':>12} {'vs star':>10} {'vs fast':>10}"
+    )
+    print("-" * 80)
+
+    # RPS row
+    rps_vals = [
+        f"{frameworks[fw]['rps']:>12,.0f}" for fw in FRAMEWORKS if fw in frameworks
+    ]
+    star_delta = format_delta(baseline["rps"], frameworks["starlette"]["rps"])
+    fast_delta = format_delta(baseline["rps"], frameworks["fastapi"]["rps"])
+    print(
+        f"  {'Requests/sec':<17} {' '.join(rps_vals)} {star_delta:>10} {fast_delta:>10}"
     )
 
-    p50_delta = format_delta(muxy["p50"], starlette["p50"], lower_is_better=True)
+    # p50 row
+    p50_vals = [
+        f"{frameworks[fw]['p50']:>12,.2f}" for fw in FRAMEWORKS if fw in frameworks
+    ]
+    star_delta = format_delta(
+        baseline["p50"], frameworks["starlette"]["p50"], lower_is_better=True
+    )
+    fast_delta = format_delta(
+        baseline["p50"], frameworks["fastapi"]["p50"], lower_is_better=True
+    )
     print(
-        f"  {'Latency p50 (ms)':<17} {muxy['p50']:>12,.2f} {starlette['p50']:>12,.2f} {p50_delta:>12}"
+        f"  {'Latency p50 (ms)':<17} {' '.join(p50_vals)} {star_delta:>10} {fast_delta:>10}"
     )
 
-    p99_delta = format_delta(muxy["p99"], starlette["p99"], lower_is_better=True)
+    # p99 row
+    p99_vals = [
+        f"{frameworks[fw]['p99']:>12,.2f}" for fw in FRAMEWORKS if fw in frameworks
+    ]
+    star_delta = format_delta(
+        baseline["p99"], frameworks["starlette"]["p99"], lower_is_better=True
+    )
+    fast_delta = format_delta(
+        baseline["p99"], frameworks["fastapi"]["p99"], lower_is_better=True
+    )
     print(
-        f"  {'Latency p99 (ms)':<17} {muxy['p99']:>12,.2f} {starlette['p99']:>12,.2f} {p99_delta:>12}"
+        f"  {'Latency p99 (ms)':<17} {' '.join(p99_vals)} {star_delta:>10} {fast_delta:>10}"
     )
 
-    print(
-        f"  {'Total requests':<17} {muxy['requests']:>12,} {starlette['requests']:>12,}"
-    )
+    # Total requests row
+    req_vals = [
+        f"{frameworks[fw]['requests']:>12,}" for fw in FRAMEWORKS if fw in frameworks
+    ]
+    print(f"  {'Total requests':<17} {' '.join(req_vals)}")
 
-    print("-" * 60)
+    print("-" * 80)
 
     print()
     print("  Individual runs (rps):")
-    print(f"    muxy:      {', '.join(f'{r["rps"]:,.0f}' for r in muxy['runs'])}")
-    print(f"    starlette: {', '.join(f'{r["rps"]:,.0f}' for r in starlette['runs'])}")
+    for fw in FRAMEWORKS:
+        if fw in frameworks:
+            runs_str = ", ".join(f"{r['rps']:,.0f}" for r in frameworks[fw]["runs"])
+            print(f"    {fw}: {runs_str}")
 
-    if muxy["errors"] > 0 or starlette["errors"] > 0:
+    total_errors = sum(
+        frameworks[fw]["errors"] for fw in FRAMEWORKS if fw in frameworks
+    )
+    if total_errors > 0:
         print()
-        print(f"  Errors: muxy={muxy['errors']}, starlette={starlette['errors']}")
+        errors_str = ", ".join(
+            f"{fw}={frameworks[fw]['errors']}" for fw in FRAMEWORKS if fw in frameworks
+        )
+        print(f"  Errors: {errors_str}")
 
     print()
 
@@ -130,22 +171,37 @@ def print_terminal(stats: dict) -> None:
 def format_markdown(stats: dict) -> str:
     """Format results as markdown."""
     metadata = stats["metadata"]
-    muxy = stats["muxy"]
-    starlette = stats["starlette"]
+    frameworks = stats["frameworks"]
     system = metadata["system"]
+    baseline = frameworks[BASELINE]
 
-    rps_delta = format_delta(muxy["rps"], starlette["rps"])
-    p50_delta = format_delta(muxy["p50"], starlette["p50"], lower_is_better=True)
-    p99_delta = format_delta(muxy["p99"], starlette["p99"], lower_is_better=True)
+    star_rps_delta = format_delta(baseline["rps"], frameworks["starlette"]["rps"])
+    fast_rps_delta = format_delta(baseline["rps"], frameworks["fastapi"]["rps"])
+    star_p50_delta = format_delta(
+        baseline["p50"], frameworks["starlette"]["p50"], lower_is_better=True
+    )
+    fast_p50_delta = format_delta(
+        baseline["p50"], frameworks["fastapi"]["p50"], lower_is_better=True
+    )
+    star_p99_delta = format_delta(
+        baseline["p99"], frameworks["starlette"]["p99"], lower_is_better=True
+    )
+    fast_p99_delta = format_delta(
+        baseline["p99"], frameworks["fastapi"]["p99"], lower_is_better=True
+    )
+
+    muxy = frameworks["muxy"]
+    starlette = frameworks["starlette"]
+    fastapi = frameworks["fastapi"]
 
     lines = [
         "## Results",
         "",
-        "| Metric | muxy | starlette | delta |",
-        "|--------|------|-----------|-------|",
-        f"| Requests/sec | {muxy['rps']:,.0f} | {starlette['rps']:,.0f} | {rps_delta} |",
-        f"| Latency p50 | {muxy['p50']:,.2f}ms | {starlette['p50']:,.2f}ms | {p50_delta} |",
-        f"| Latency p99 | {muxy['p99']:,.2f}ms | {starlette['p99']:,.2f}ms | {p99_delta} |",
+        "| Metric       | muxy    | starlette | fastapi | vs starlette | vs fastapi |",
+        "| ------------ | ------- | --------- | ------- | ------------ | ---------- |",
+        f"| Requests/sec | {muxy['rps']:,.0f} | {starlette['rps']:,.0f} | {fastapi['rps']:,.0f} | {star_rps_delta} | {fast_rps_delta} |",
+        f"| Latency p50  | {muxy['p50']:.2f}ms | {starlette['p50']:.2f}ms | {fastapi['p50']:.2f}ms | {star_p50_delta} | {fast_p50_delta} |",
+        f"| Latency p99  | {muxy['p99']:.2f}ms | {starlette['p99']:.2f}ms | {fastapi['p99']:.2f}ms | {star_p99_delta} | {fast_p99_delta} |",
         "",
         "<details>",
         "<summary>Benchmark details</summary>",
@@ -175,12 +231,16 @@ def format_markdown(stats: dict) -> str:
             f"- **wrk threads**: {metadata['threads']}",
             "",
             "Individual runs (requests/sec):",
-            f"- muxy: {', '.join(f'{r["rps"]:,.0f}' for r in muxy['runs'])}",
-            f"- starlette: {', '.join(f'{r["rps"]:,.0f}' for r in starlette['runs'])}",
             "",
-            "</details>",
         ]
     )
+
+    for fw in FRAMEWORKS:
+        if fw in frameworks:
+            runs_str = ", ".join(f"{r['rps']:,.0f}" for r in frameworks[fw]["runs"])
+            lines.append(f"- {fw}: {runs_str}")
+
+    lines.extend(["", "</details>", ""])
 
     return "\n".join(lines)
 

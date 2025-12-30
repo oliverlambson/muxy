@@ -47,16 +47,16 @@ DURATION=30 CONNECTIONS=200 RUNS=5 ./scripts/bench.sh
 
 ## Results
 
-| Metric       | muxy    | starlette | delta   |
-| ------------ | ------- | --------- | ------- |
-| Requests/sec | 173,907 | 50,626    | +243.5% |
-| Latency p50  | 0.51ms  | 1.88ms    | -72.9%  |
-| Latency p99  | 0.77ms  | 2.38ms    | -67.6%  |
+| Metric       | muxy    | starlette | fastapi | vs starlette | vs fastapi |
+| ------------ | ------- | --------- | ------- | ------------ | ---------- |
+| Requests/sec | 168,895 | 51,607    | 30,196  | -69.4%       | -82.1%     |
+| Latency p50  | 0.53ms  | 1.85ms    | 3.04ms  | -249.1%      | -473.6%    |
+| Latency p99  | 0.79ms  | 2.33ms    | 3.97ms  | -194.9%      | -402.5%    |
 
 <details>
 <summary>Benchmark details</summary>
 
-**Date**: 2025-12-30
+**Date**: 2025-12-31
 
 **Device**: MacBook Air
 **CPU**: Apple M3 (8 cores, 16GB RAM)
@@ -68,7 +68,8 @@ DURATION=30 CONNECTIONS=200 RUNS=5 ./scripts/bench.sh
 
 Individual runs (requests/sec):
 
-- muxy: 173,907, 173,679, 174,817
-- starlette: 50,626, 50,620, 50,633
+- muxy: 172,622, 168,895, 168,259
+- starlette: 51,577, 51,607, 51,615
+- fastapi: 30,196, 30,204, 30,173
 
 </details>

@@ -199,9 +199,11 @@ main() {
   "results": {
 EOF
 
-    benchmark_framework "muxy" "rsgi" "$temp_file"
+    benchmark_framework "fastapi" "asgi" "$temp_file"
     echo "," >>"$temp_file"
     benchmark_framework "starlette" "asgi" "$temp_file"
+    echo "," >>"$temp_file"
+    benchmark_framework "muxy" "rsgi" "$temp_file"
 
     # close json
     echo "  }" >>"$temp_file"
