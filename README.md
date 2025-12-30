@@ -82,7 +82,7 @@ async def not_found(_scope: HTTPScope, proto: HTTPProtocol) -> None:
     proto.response_str(404, [("Content-Type", "text/plain")], "Not found")
 
 async def method_not_allowed(_scope: HTTPScope, proto: HTTPProtocol) -> None:
-    proto.response_str(404, [("Content-Type", "text/plain")], "Method not allowed")
+    proto.response_str(405, [("Content-Type", "text/plain")], "Method not allowed")
 
 async def home(s: HTTPScope, p: HTTPProtocol) -> None:
     p.response_str(200, [("Content-Type", "text/plain")], "Welcome home")
