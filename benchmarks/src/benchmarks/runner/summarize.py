@@ -8,7 +8,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-FRAMEWORKS = ["muxy", "starlette", "fastapi"]
+FRAMEWORKS = ["muxy", "starlette", "litestar", "fastapi"]
 BASELINE = "muxy"
 
 
