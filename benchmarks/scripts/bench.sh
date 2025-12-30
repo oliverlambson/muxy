@@ -81,13 +81,28 @@ start_server() {
     local framework=$1
     local interface=$2
 
+    if lsof -i :$PORT >/dev/null 2>&1; then
+        error "Port $PORT is already in use! Aborting."
+        lsof -i :$PORT
+        exit 1
+    fi
+
     log "Starting $framework server..."
-    uv run granian "benchmarks.app.${framework}:root_router" \
-        --loop uvloop \
-        --interface "$interface" \
-        --port $PORT \
-        --workers 1 \
-        >/dev/null 2>&1 &
+
+    if [ "$framework" = "sanic" ]; then
+        # sanic uses its own server
+        uv run sanic "benchmarks.app.sanic:root_router" \
+            --port $PORT \
+            --single-process \
+            >/dev/null 2>&1 &
+    else
+        uv run granian "benchmarks.app.${framework}:root_router" \
+            --loop uvloop \
+            --interface "$interface" \
+            --port $PORT \
+            --workers 1 \
+            >/dev/null 2>&1 &
+    fi
 
     SERVER_PID=$!
 
@@ -112,6 +127,7 @@ stop_server() {
         kill $SERVER_PID 2>/dev/null || true
         wait $SERVER_PID 2>/dev/null || true
         SERVER_PID=""
+        sleep 1 # ensure port is released before next server starts
     fi
 }
 
@@ -202,6 +218,8 @@ EOF
     benchmark_framework "fastapi" "asgi" "$temp_file"
     echo "," >>"$temp_file"
     benchmark_framework "litestar" "asgi" "$temp_file"
+    echo "," >>"$temp_file"
+    benchmark_framework "sanic" "sanic" "$temp_file"
     echo "," >>"$temp_file"
     benchmark_framework "starlette" "asgi" "$temp_file"
     echo "," >>"$temp_file"
