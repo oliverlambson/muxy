@@ -1,0 +1,26 @@
+[project]
+name = "benchmarks"
+version = "0.1.0"
+description = "Benchmarks for muxy"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "muxy",
+    "granian[uvloop]>=2.6.0,<3.0.0",
+    "starlette>=0.50.0,<0.51.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.5,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv]
+add-bounds = "major"
+
+[tool.uv.sources]
+muxy = { path = ".." }
+
+[dependency-groups]
+dev = [
+    "ty>=0.0.8,<0.0.9",
+]
