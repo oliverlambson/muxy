@@ -11,6 +11,7 @@ dependencies = [
     "fastapi>=0.128.0,<0.129.0",
     "litestar>=2.19.0,<3.0.0",
     "sanic>=25.3.0,<26.0.0",
+    "quart>=0.20.0,<0.21.0",
 ]
 
 [build-system]

@@ -219,6 +219,8 @@ EOF
     echo "," >>"$temp_file"
     benchmark_framework "litestar" "asgi" "$temp_file"
     echo "," >>"$temp_file"
+    benchmark_framework "quart" "asgi" "$temp_file"
+    echo "," >>"$temp_file"
     benchmark_framework "sanic" "sanic" "$temp_file"
     echo "," >>"$temp_file"
     benchmark_framework "starlette" "asgi" "$temp_file"
