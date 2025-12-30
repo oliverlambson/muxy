@@ -1,17 +1,18 @@
 # Benchmarks
 
-Comparing **muxy** (RSGI) vs **starlette** (ASGI) framework overhead.
+**Aim:** Compare framework overhead for a mid-sized "mature" app.
 
 ## What's being measured
 
 Framework and protocol overhead: routing, middleware dispatch, request/response handling,
 along with performance gains switching from ASGI to RSGI. All handlers return a simple
-plaintext string, and middlewares are no-ops isolating framework performance from
+plaintext string, and middlewares are no-ops: isolating framework performance from
 application logic.
 
 ## Setup
 
-Both frameworks run identical applications with:
+The app is implemented in the idiomatic style for each framework/router, the app
+structure contains:
 
 - **70 route patterns** across 10 routers (root, auth, products, orders, cart, payments, api, admin, etc.)
 - **23,046 concrete URLs** (parameterized routes expanded with IDs 1-100)
@@ -29,14 +30,18 @@ Server: [Granian](https://github.com/emmett-framework/granian) with uvloop, 1 wo
 
 ## Running
 
-```bash
-# Install wrk
-brew install wrk
+The benchmark script uses [`wrk`](https://github.com/wg/wrk) to actually run the
+stress-test. There's a prep script to generate the concrete URL inputs, and another
+script to pretty-print the JSON results.
 
-# Run benchmarks
+```bash
+# install wrk
+brew install wrk  # or whatever your package manager is
+
+# run benchmarks
 ./scripts/bench.sh
 
-# Custom parameters
+# [optional] run benchmarks with custom parameters
 DURATION=30 CONNECTIONS=200 RUNS=5 ./scripts/bench.sh
 ```
 
@@ -44,9 +49,9 @@ DURATION=30 CONNECTIONS=200 RUNS=5 ./scripts/bench.sh
 
 | Metric       | muxy    | starlette | delta   |
 | ------------ | ------- | --------- | ------- |
-| Requests/sec | 174,051 | 51,016    | +241.2% |
-| Latency p50  | 0.52ms  | 1.88ms    | -72.3%  |
-| Latency p99  | 0.76ms  | 2.37ms    | -67.9%  |
+| Requests/sec | 173,907 | 50,626    | +243.5% |
+| Latency p50  | 0.51ms  | 1.88ms    | -72.9%  |
+| Latency p99  | 0.77ms  | 2.38ms    | -67.6%  |
 
 <details>
 <summary>Benchmark details</summary>
@@ -63,7 +68,7 @@ DURATION=30 CONNECTIONS=200 RUNS=5 ./scripts/bench.sh
 
 Individual runs (requests/sec):
 
-- muxy: 173,648, 175,475, 174,051
-- starlette: 51,066, 51,016, 50,933
+- muxy: 173,907, 173,679, 174,817
+- starlette: 50,626, 50,620, 50,633
 
 </details>
