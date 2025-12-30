@@ -5,16 +5,14 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
+from benchmarks.app._common import root_router
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-from benchmarks.app._common import root_router
 
-# Number of unique IDs to generate for parameterized routes
-# This exceeds muxy's LRU cache size (1024) when combined with route count
-NUM_IDS = 100
+NUM_IDS = 100  # Number of unique IDs to generate for parameterized routes
 
-# Sample paths for catch-all routes
 CATCHALL_PATHS = [
     "file.css",
     "js/app.js",
@@ -32,17 +30,25 @@ def extract_routes(router: dict, prefix: str = "") -> Iterator[tuple[str, str]]:
         yield from extract_routes(sub_router, prefix + mount_path)
 
 
+CATCHALL_PATTERN = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\.\.\.\}")
+PARAM_PATTERN = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
 def expand_route(method: str, path: str) -> Iterator[tuple[str, str]]:
-    """Expand parameterized routes into concrete URLs."""
-    # Catch-all routes: {path...}
-    if "{path...}" in path:
-        base = path.replace("{path...}", "")
+    """Expand parameterized routes into concrete URLs.
+
+    Recursively handles multiple params in a single route.
+    """
+    # catchall routes: {name...}
+    catchall_match = CATCHALL_PATTERN.search(path)
+    if catchall_match:
+        base = CATCHALL_PATTERN.sub("", path)
         for sample_path in CATCHALL_PATHS:
             yield (method, base + sample_path)
         return
 
-    # Check for parameters like {id}, {token}
-    param_match = re.search(r"\{(\w+)\}", path)
+    # parameterized routes: {name}
+    param_match = PARAM_PATTERN.search(path)
     if param_match:
         param_name = param_match.group(1)
         for i in range(1, NUM_IDS + 1):
@@ -50,11 +56,12 @@ def expand_route(method: str, path: str) -> Iterator[tuple[str, str]]:
                 value = f"token_{i}"
             else:
                 value = str(i)
-            concrete_path = re.sub(r"\{" + param_name + r"\}", value, path)
-            yield (method, concrete_path)
+            concrete_path = PARAM_PATTERN.sub(value, path, count=1)
+            # recursively expand any remaining params
+            yield from expand_route(method, concrete_path)
         return
 
-    # No parameters - yield as-is
+    # plain routes
     yield (method, path)
 
 
