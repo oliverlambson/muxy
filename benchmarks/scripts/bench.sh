@@ -26,7 +26,7 @@ cd "$PROJECT_DIR"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 log() {
     echo -e "${GREEN}[bench]${NC} $1"
@@ -40,7 +40,6 @@ error() {
     echo -e "${RED}[bench]${NC} $1"
 }
 
-# Check dependencies
 check_deps() {
     if ! command -v wrk &>/dev/null; then
         error "wrk not found. Install with: brew install wrk"
@@ -52,7 +51,6 @@ check_deps() {
     fi
 }
 
-# Get system info
 get_system_info() {
     local os=$(uname -s)
     local arch=$(uname -m)
@@ -72,7 +70,6 @@ get_system_info() {
     OS_INFO="${os} $(uname -r) (${arch})"
 }
 
-# Generate targets file
 generate_targets() {
     log "Generating targets..."
     uv run python -m benchmarks.runner.targets >scripts/targets.txt
@@ -80,7 +77,6 @@ generate_targets() {
     log "Generated $count targets"
 }
 
-# Start server and wait for ready
 start_server() {
     local framework=$1
     local interface=$2
@@ -95,8 +91,8 @@ start_server() {
 
     SERVER_PID=$!
 
-    # Wait for server to be ready
-    local max_wait=30
+    # wait for server to be ready
+    local max_wait=3
     local waited=0
     while ! curl -s "http://localhost:$PORT/" >/dev/null 2>&1; do
         sleep 0.1
@@ -110,7 +106,6 @@ start_server() {
     log "$framework server ready (PID: $SERVER_PID)"
 }
 
-# Stop server
 stop_server() {
     if [ -n "$SERVER_PID" ]; then
         log "Stopping server (PID: $SERVER_PID)..."
@@ -120,13 +115,11 @@ stop_server() {
     fi
 }
 
-# Warmup
 warmup() {
     log "Warming up for ${WARMUP_DURATION}s..."
     wrk -t1 -c10 -d${WARMUP_DURATION}s -s scripts/routes.lua "http://localhost:$PORT" >/dev/null 2>&1
 }
 
-# Run single benchmark
 run_benchmark() {
     local framework=$1
     local run_num=$2
@@ -136,7 +129,6 @@ run_benchmark() {
 
     local output=$(wrk -t$THREADS -c$CONNECTIONS -d${DURATION}s -s scripts/routes.lua "http://localhost:$PORT" 2>&1)
 
-    # Extract JSON results from output
     local json=$(echo "$output" | sed -n '/RESULTS_JSON_START/,/RESULTS_JSON_END/p' | grep -v 'RESULTS_JSON')
 
     if [ -z "$json" ]; then
@@ -148,7 +140,6 @@ run_benchmark() {
     echo "$json" >>"$output_file"
 }
 
-# Benchmark a single framework
 benchmark_framework() {
     local framework=$1
     local interface=$2
@@ -164,7 +155,7 @@ benchmark_framework() {
     for run in $(seq 1 $RUNS); do
         if [ $run -gt 1 ]; then
             echo "," >>"$results_file"
-            sleep 1 # Brief pause between runs
+            sleep 1 # brief pause between runs
         fi
         run_benchmark "$framework" "$run" "$results_file"
     done
@@ -174,13 +165,11 @@ benchmark_framework() {
     stop_server
 }
 
-# Main
 main() {
     check_deps
     get_system_info
     generate_targets
 
-    # Create results directory
     mkdir -p results
     local timestamp=$(date +%Y%m%d_%H%M%S)
     local results_file="results/${timestamp}.json"
@@ -190,7 +179,7 @@ main() {
     log "System: $DEVICE / $CPU ($CORES cores, ${MEMORY_GB}GB RAM)"
     log "Results will be saved to: $results_file"
 
-    # Start JSON file
+    # start json file
     cat >"$temp_file" <<EOF
 {
   "metadata": {
@@ -210,49 +199,37 @@ main() {
   "results": {
 EOF
 
-    # Benchmark muxy
     benchmark_framework "muxy" "rsgi" "$temp_file"
-
     echo "," >>"$temp_file"
-
-    # Benchmark starlette
     benchmark_framework "starlette" "asgi" "$temp_file"
 
-    # Close JSON
-    echo "}" >>"$temp_file"
+    # close json
+    echo "  }" >>"$temp_file"
     echo "}" >>"$temp_file"
 
-    mv "$temp_file" "$results_file"
+    jq -r '.' "$temp_file" >"$results_file"
 
-    # Create latest symlink
+    # copy to results.json (gets committed)
+    cp "$results_file" results.json
+
+    # create latest symlink for convenience
     ln -sf "${timestamp}.json" results/latest.json
 
     log "Results saved to: $results_file"
     log ""
 
-    # Print summary to terminal
+    # print summary to terminal
     uv run python -m benchmarks.runner.summarize "$results_file"
 
-    # Update README.md with results
+    # update README.md with results
     log "Updating README.md..."
     uv run python -m benchmarks.runner.summarize "$results_file" --markdown >README.md.new
-
-    # Preserve header if README exists, otherwise create new
     if [ -f README.md ]; then
-        # Extract everything before "## Results" and append new results
+        # preserve everything before "## Results"
         sed '/^## Results/,$d' README.md >README.md.header
         cat README.md.header README.md.new >README.md
         rm README.md.header README.md.new
     else
-        # Create new README with header
-        cat >README.md <<HEADER
-# Benchmarks
-
-Comparing muxy (RSGI) vs starlette (ASGI) framework overhead.
-
-Run benchmarks: \`./scripts/bench.sh\`
-
-HEADER
         cat README.md.new >>README.md
         rm README.md.new
     fi
@@ -260,7 +237,7 @@ HEADER
     log "README.md updated"
 }
 
-# Cleanup on exit
+# cleanup on exit
 trap stop_server EXIT
 
-main "$@"
+main

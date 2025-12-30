@@ -1,0 +1,100 @@
+{
+  "metadata": {
+    "timestamp": "2025-12-30T23:35:51+02:00",
+    "duration_sec": 10,
+    "connections": 100,
+    "threads": 4,
+    "runs": 3,
+    "system": {
+      "device": "MacBook Air",
+      "os": "Darwin 25.1.0 (arm64)",
+      "cpu": "Apple M3",
+      "cores": 8,
+      "memory_gb": 16
+    }
+  },
+  "results": {
+    "muxy": [
+      {
+        "requests": 1756468,
+        "duration_sec": 10.10,
+        "rps": 173907.71,
+        "latency_mean_ms": 0.53,
+        "latency_stdev_ms": 0.18,
+        "latency_max_ms": 9.47,
+        "latency_p50_ms": 0.51,
+        "latency_p90_ms": 0.61,
+        "latency_p99_ms": 0.77,
+        "errors": 0,
+        "targets_count": 23046
+      },
+      {
+        "requests": 1754220,
+        "duration_sec": 10.10,
+        "rps": 173679.41,
+        "latency_mean_ms": 0.53,
+        "latency_stdev_ms": 0.18,
+        "latency_max_ms": 6.11,
+        "latency_p50_ms": 0.51,
+        "latency_p90_ms": 0.61,
+        "latency_p99_ms": 0.85,
+        "errors": 0,
+        "targets_count": 23046
+      },
+      {
+        "requests": 1765789,
+        "duration_sec": 10.10,
+        "rps": 174817.25,
+        "latency_mean_ms": 0.52,
+        "latency_stdev_ms": 0.11,
+        "latency_max_ms": 4.33,
+        "latency_p50_ms": 0.51,
+        "latency_p90_ms": 0.60,
+        "latency_p99_ms": 0.76,
+        "errors": 0,
+        "targets_count": 23046
+      }
+    ],
+    "starlette": [
+      {
+        "requests": 511301,
+        "duration_sec": 10.10,
+        "rps": 50626.07,
+        "latency_mean_ms": 1.97,
+        "latency_stdev_ms": 0.26,
+        "latency_max_ms": 5.09,
+        "latency_p50_ms": 1.88,
+        "latency_p90_ms": 2.26,
+        "latency_p99_ms": 2.38,
+        "errors": 0,
+        "targets_count": 23046
+      },
+      {
+        "requests": 511250,
+        "duration_sec": 10.10,
+        "rps": 50620.04,
+        "latency_mean_ms": 1.97,
+        "latency_stdev_ms": 0.26,
+        "latency_max_ms": 5.22,
+        "latency_p50_ms": 1.88,
+        "latency_p90_ms": 2.27,
+        "latency_p99_ms": 2.37,
+        "errors": 0,
+        "targets_count": 23046
+      },
+      {
+        "requests": 511470,
+        "duration_sec": 10.10,
+        "rps": 50633.97,
+        "latency_mean_ms": 1.97,
+        "latency_stdev_ms": 0.26,
+        "latency_max_ms": 5.42,
+        "latency_p50_ms": 1.88,
+        "latency_p90_ms": 2.27,
+        "latency_p99_ms": 2.38,
+        "errors": 0,
+        "targets_count": 23046
+      }
+    ]
+  }
+}
