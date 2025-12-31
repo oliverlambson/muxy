@@ -68,7 +68,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.128.0,<0.129.0" },
     { name = "granian", extras = ["uvloop"], specifier = ">=2.6.0,<3.0.0" },
     { name = "litestar", specifier = ">=2.19.0,<3.0.0" },
-    { name = "muxy", directory = "../" },
+    { name = "muxy", editable = "../" },
     { name = "quart", specifier = ">=0.20.0,<0.21.0" },
     { name = "sanic", specifier = ">=25.3.0,<26.0.0" },
     { name = "starlette", specifier = ">=0.50.0,<0.51.0" },
@@ -561,8 +561,8 @@ wheels = [
 
 [[package]]
 name = "muxy"
-version = "0.1.0a4"
-source = { directory = "../" }
+version = "0.1.0a5"
+source = { editable = "../" }
 
 [package.metadata]
 
