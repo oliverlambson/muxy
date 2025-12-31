@@ -10,6 +10,7 @@ from pathlib import Path
 
 FRAMEWORKS = [
     "muxy",
+    "muxy_asgi",
     "sanic",
     "blacksheep",
     "litestar",

@@ -23,7 +23,7 @@ build-backend = "uv_build"
 add-bounds = "major"
 
 [tool.uv.sources]
-muxy = { path = ".." }
+muxy = { path = "..", editable = true }
 
 [dependency-groups]
 dev = [
