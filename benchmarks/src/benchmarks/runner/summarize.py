@@ -10,12 +10,12 @@ from pathlib import Path
 
 FRAMEWORKS = [
     "muxy",
-    "starlette",
-    "litestar",
     "sanic",
+    "blacksheep",
+    "litestar",
+    "starlette",
     "fastapi",
     "quart",
-    "blacksheep",
 ]
 BASELINE = "muxy"
 

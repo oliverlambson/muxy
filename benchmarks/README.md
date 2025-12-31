@@ -50,12 +50,12 @@ DURATION=30 CONNECTIONS=200 RUNS=5 ./scripts/bench.sh
 |                | Requests/sec   | Latency p50    | Latency p99   |
 | -------------- | -------------- | -------------- | ------------- |
 | **muxy**       | 176,732 (100%) | 0.51ms (100%)  | 0.70ms (100%) |
-| **starlette**  | 51,273 (29%)   | 1.85ms (363%)  | 2.33ms (333%) |
-| **litestar**   | 51,570 (29%)   | 1.93ms (378%)  | 2.13ms (304%) |
 | **sanic**      | 65,757 (37%)   | 1.53ms (300%)  | 1.72ms (246%) |
+| **blacksheep** | 52,769 (30%)   | 1.97ms (386%)  | 2.13ms (304%) |
+| **litestar**   | 51,570 (29%)   | 1.93ms (378%)  | 2.13ms (304%) |
+| **starlette**  | 51,273 (29%)   | 1.85ms (363%)  | 2.33ms (333%) |
 | **fastapi**    | 30,377 (17%)   | 3.01ms (590%)  | 3.94ms (563%) |
 | **quart**      | 17,912 (10%)   | 5.59ms (1096%) | 6.56ms (937%) |
-| **blacksheep** | 52,769 (30%)   | 1.97ms (386%)  | 2.13ms (304%) |
 
 <details>
 <summary>Benchmark details</summary>
@@ -73,11 +73,11 @@ DURATION=30 CONNECTIONS=200 RUNS=5 ./scripts/bench.sh
 Individual runs (requests/sec):
 
 - muxy: 178,740, 176,732, 175,124
-- starlette: 51,267, 51,294, 51,273
-- litestar: 51,570, 52,161, 51,395
 - sanic: 64,430, 65,950, 65,757
+- blacksheep: 52,809, 52,296, 52,769
+- litestar: 51,570, 52,161, 51,395
+- starlette: 51,267, 51,294, 51,273
 - fastapi: 30,428, 30,367, 30,377
 - quart: 17,966, 17,912, 17,855
-- blacksheep: 52,809, 52,296, 52,769
 
 </details>
