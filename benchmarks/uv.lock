@@ -46,6 +46,7 @@ name = "benchmarks"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "blacksheep" },
     { name = "fastapi" },
     { name = "granian", extra = ["uvloop"] },
     { name = "litestar" },
@@ -63,6 +64,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "blacksheep", specifier = ">=2.4.5,<3.0.0" },
     { name = "fastapi", specifier = ">=0.128.0,<0.129.0" },
     { name = "granian", extras = ["uvloop"], specifier = ">=2.6.0,<3.0.0" },
     { name = "litestar", specifier = ">=2.19.0,<3.0.0" },
@@ -76,6 +78,32 @@ requires-dist = [
 dev = [
     { name = "ruff", specifier = ">=0.14.10,<0.15.0" },
     { name = "ty", specifier = ">=0.0.8,<0.0.9" },
+]
+
+[[package]]
+name = "blacksheep"
+version = "2.4.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "certifi" },
+    { name = "essentials" },
+    { name = "essentials-openapi" },
+    { name = "guardpost" },
+    { name = "h11", marker = "platform_python_implementation == 'PyPy'" },
+    { name = "httptools", marker = "platform_python_implementation != 'PyPy'" },
+    { name = "itsdangerous" },
+    { name = "rodi" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1f/61/367cef1f60d0e03d81994c053d954d70d0e6dc7be8c0f13cd547b081bc92/blacksheep-2.4.5.tar.gz", hash = "sha256:37cd3882cccc9f5d5a721cb9359e22dab3f8b0deb7c642987819e2bd338756c7", size = 268325, upload-time = "2025-11-15T20:51:24.718Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a2/c2/c8ceafef3fb0778804ac19b2f34b9d024d88a1f7201205761d89dd154569/blacksheep-2.4.5-cp314-cp314-macosx_10_15_universal2.whl", hash = "sha256:8ad699e4d23b4812750db48bf86ff5508cc0275fdb3cd15772e86ffff33e2789", size = 2514632, upload-time = "2025-11-15T20:51:14.83Z" },
+    { url = "https://files.pythonhosted.org/packages/07/96/589c872b927c41f6a9eb3d1bfb30b3b4c0ef7b55894504cac6e166a8a05f/blacksheep-2.4.5-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:e5ba9fe2b2293fc23bc85b4edc27cccfb11290857a038f48a94e31888173edb7", size = 5082850, upload-time = "2025-11-15T20:51:16.241Z" },
+    { url = "https://files.pythonhosted.org/packages/c2/6f/1b3cf4b21646cdb3b935a1eef3defaee0fe633ab8ccdce248ed1c1d7c225/blacksheep-2.4.5-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:a02e92142b8ccd76765da3adfa2a4bc85dd5fe7d41c18891765de3eca7197238", size = 4953452, upload-time = "2025-11-15T20:51:17.535Z" },
+    { url = "https://files.pythonhosted.org/packages/02/85/3b53a1c19c0ff306d077ff2b54cde8dd130c91b65c0ad0083cd2c05be78e/blacksheep-2.4.5-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:daee44bd298a47fd7535092018a2b986bf362356f937cdf976822c43113bc109", size = 4875545, upload-time = "2025-11-15T20:51:18.792Z" },
+    { url = "https://files.pythonhosted.org/packages/2c/b8/7e065403db8c91e1860ec8b83d9eb7e42f26fa69f7062a889b6bc363a198/blacksheep-2.4.5-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:6d540e406ea069ec0be0126c75a6c31bb9d333ef1a4c3e7f4ea142462d33b6b6", size = 4829106, upload-time = "2025-11-15T20:51:20.06Z" },
+    { url = "https://files.pythonhosted.org/packages/eb/7f/53bf78da30c4848b8b1ee03e6a30999a1e78030d49e43c76dff5274e10eb/blacksheep-2.4.5-cp314-cp314-win_amd64.whl", hash = "sha256:c63a4e84602654714344c2e5282ecd5067ff4f9b7b91128280f468a30c3c5a90", size = 1783081, upload-time = "2025-11-15T20:51:21.275Z" },
+    { url = "https://files.pythonhosted.org/packages/0a/a3/efb800fddfb8dad5bfbd3a25ca278cef75cd8ff1549536695a7c2eb90456/blacksheep-2.4.5-cp314-cp314-win_arm64.whl", hash = "sha256:a66bfe63d757e63793416382e2f4bc0088a0b924d75c09c7ee32186ec9b6ad07", size = 1707928, upload-time = "2025-11-15T20:51:22.357Z" },
+    { url = "https://files.pythonhosted.org/packages/f2/41/22ff8337340945418405eb6c9edb609c1a20d5a083509fbd83771a8c6a63/blacksheep-2.4.5-py3-none-any.whl", hash = "sha256:81f31337437646c96f2d9c5acd61c8bc612b0681bf36211a642de9f8798be0c5", size = 1278882, upload-time = "2025-11-15T20:51:23.468Z" },
 ]
 
 [[package]]
@@ -115,6 +143,29 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d8/53/6f443c9a4a8358a93a6792e2acffb9d9d5cb0a5cfd8802644b7b1c9a02e4/colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44", size = 27697, upload-time = "2022-10-25T02:36:22.414Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6", size = 25335, upload-time = "2022-10-25T02:36:20.889Z" },
+]
+
+[[package]]
+name = "essentials"
+version = "1.1.9"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b6/ff/587c8789abad9c76ef2a5bf613c6d7922a0d09879e3eda1864d108f11b75/essentials-1.1.9.tar.gz", hash = "sha256:7fbea3a518cbeafe5374fb7e2ea2c15a109e8a7fd1eaab62ae87cbd1b3b1e8d0", size = 25068, upload-time = "2025-11-23T20:34:46.533Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/50/8b/68aa342fa78931429ea09e6dc8d9ffa46fa36cfb0cf423e612d22365a9c2/essentials-1.1.9-py2.py3-none-any.whl", hash = "sha256:71ef161e0e27ef77cd6f5fc05e0b8688a575fcab870c01c95940f832e321dfbb", size = 16151, upload-time = "2025-11-23T20:34:45.025Z" },
+]
+
+[[package]]
+name = "essentials-openapi"
+version = "1.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "essentials" },
+    { name = "markupsafe" },
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2d/eb/0ec8f7f0e8fc84ae498e50724ce89d95991a0efb2299bc76197e4c2402a9/essentials_openapi-1.3.0.tar.gz", hash = "sha256:453327a0a847a431133f4472ced7e4a9180bf667437049b57381ddf88079e886", size = 34360, upload-time = "2025-11-19T20:41:27.889Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/61/d5/2b68c37d8b84f55127eddd6abf9ed8eff8bafb43f7fa73a3be1557f4e897/essentials_openapi-1.3.0-py3-none-any.whl", hash = "sha256:9c2a88531e2c70c565d5b526d74043941e46f60c114f7a0e3ae91e9e6bef4dae", size = 55232, upload-time = "2025-11-19T20:41:26.493Z" },
 ]
 
 [[package]]
@@ -195,6 +246,18 @@ wheels = [
 [package.optional-dependencies]
 uvloop = [
     { name = "uvloop", marker = "platform_python_implementation == 'CPython' and sys_platform != 'win32'" },
+]
+
+[[package]]
+name = "guardpost"
+version = "1.0.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "rodi" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ef/f3/6ceb31411cfbde3db6f8f7a9ce60fcdb5285794f22808dcc100de86dc2ca/guardpost-1.0.4.tar.gz", hash = "sha256:0e3461d3303c7aecdaa65a05e39ef6d8b26ce1a4ebe4b9724b573b562487960c", size = 18453, upload-time = "2025-10-18T18:13:26.323Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ee/f9/a21034def38dbbf9c59feee7bae810d693a4b3f132a66bdba8ee016a089d/guardpost-1.0.4-py3-none-any.whl", hash = "sha256:f0176a0085ae2525015f429ad8665c1901d8441f7667bd426a3cf025411debdd", size = 22526, upload-time = "2025-10-18T18:13:25.129Z" },
 ]
 
 [[package]]
@@ -667,6 +730,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/6b/d1/b60ca6a8745e76800b50c7ee246fd73f08a3be5d8e0b551fc93c19fa1203/rich_click-1.9.5.tar.gz", hash = "sha256:48120531493f1533828da80e13e839d471979ec8d7d0ca7b35f86a1379cc74b6", size = 73927, upload-time = "2025-12-21T14:49:44.167Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/25/0a/d865895e1e5d88a60baee0fc3703eb111c502ee10c8c107516bc7623abf8/rich_click-1.9.5-py3-none-any.whl", hash = "sha256:9b195721a773b1acf0e16ff9ec68cef1e7d237e53471e6e3f7ade462f86c403a", size = 70580, upload-time = "2025-12-21T14:49:42.905Z" },
+]
+
+[[package]]
+name = "rodi"
+version = "2.0.8"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/28/5c/2d914ad5f15bbd1cbf8589db4ec18a4b23806cbfa543f7ff91bacdf937f7/rodi-2.0.8.tar.gz", hash = "sha256:de122527dc6c0dd2d28bf57ac425b9dd22e37535fb1d7d22eadab0a079edcbe4", size = 13961, upload-time = "2025-04-12T09:10:37.708Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/71/2b/95b00bd0c37cae49d8d3ec6313799260ac5788763a7c64015685190ea4e2/rodi-2.0.8-py3-none-any.whl", hash = "sha256:78a4ee6a29b4a4ce5d7474e3585149b3e78d613dc0cd2a10719b7a7f0f30ca05", size = 12713, upload-time = "2025-04-12T09:10:36.455Z" },
 ]
 
 [[package]]

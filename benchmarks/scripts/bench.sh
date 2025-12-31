@@ -215,6 +215,8 @@ main() {
   "results": {
 EOF
 
+    benchmark_framework "blacksheep" "asgi" "$temp_file"
+    echo "," >>"$temp_file"
     benchmark_framework "fastapi" "asgi" "$temp_file"
     echo "," >>"$temp_file"
     benchmark_framework "litestar" "asgi" "$temp_file"
