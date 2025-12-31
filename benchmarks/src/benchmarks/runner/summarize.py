@@ -141,7 +141,7 @@ def format_markdown(stats: dict) -> str:
         "## Results",
         "",
         "|     | Requests/sec | Latency p50 | Latency p99 |",
-        "| --- | ------------ | ----------- | ----------- |",
+        "| --- | -----------: | ----------: | ----------: |",
     ]
 
     for fw in FRAMEWORKS:

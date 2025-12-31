@@ -26,7 +26,11 @@ structure contains:
 | Catch-all     | `/static/{path...}`                                   |
 | Nested        | `/admin/users/{id}/activity`, `/api/v1/products/{id}` |
 
-Server: [Granian](https://github.com/emmett-framework/granian) with uvloop, 1 worker.
+Servers:
+
+- RSGI frameworks use [Granian](https://github.com/emmett-framework/granian) with uvloop, 1 worker.
+- ASGI frameworks use [Granian](https://github.com/emmett-framework/granian) with uvloop, 1 worker.
+- [Sanic](https://sanic.dev/en/) provides it's own server, so that's used instead for Sanic only.
 
 ## Running
 
@@ -47,15 +51,15 @@ DURATION=30 CONNECTIONS=200 RUNS=5 ./scripts/bench.sh
 
 ## Results
 
-|                | Requests/sec   | Latency p50    | Latency p99   |
-| -------------- | -------------- | -------------- | ------------- |
-| **muxy**       | 176,732 (100%) | 0.51ms (100%)  | 0.70ms (100%) |
-| **sanic**      | 65,757 (37%)   | 1.53ms (300%)  | 1.72ms (246%) |
-| **blacksheep** | 52,769 (30%)   | 1.97ms (386%)  | 2.13ms (304%) |
-| **litestar**   | 51,570 (29%)   | 1.93ms (378%)  | 2.13ms (304%) |
-| **starlette**  | 51,273 (29%)   | 1.85ms (363%)  | 2.33ms (333%) |
-| **fastapi**    | 30,377 (17%)   | 3.01ms (590%)  | 3.94ms (563%) |
-| **quart**      | 17,912 (10%)   | 5.59ms (1096%) | 6.56ms (937%) |
+|                |   Requests/sec |    Latency p50 |   Latency p99 |
+| -------------- | -------------: | -------------: | ------------: |
+| **muxy**       | 176,732 (100%) |  0.51ms (100%) | 0.70ms (100%) |
+| **sanic**      |   65,757 (37%) |  1.53ms (300%) | 1.72ms (246%) |
+| **blacksheep** |   52,769 (30%) |  1.97ms (386%) | 2.13ms (304%) |
+| **litestar**   |   51,570 (29%) |  1.93ms (378%) | 2.13ms (304%) |
+| **starlette**  |   51,273 (29%) |  1.85ms (363%) | 2.33ms (333%) |
+| **fastapi**    |   30,377 (17%) |  3.01ms (590%) | 3.94ms (563%) |
+| **quart**      |   17,912 (10%) | 5.59ms (1096%) | 6.56ms (937%) |
 
 <details>
 <summary>Benchmark details</summary>
