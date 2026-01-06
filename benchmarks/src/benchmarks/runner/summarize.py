@@ -11,6 +11,7 @@ from pathlib import Path
 FRAMEWORKS = [
     "muxy",
     "muxy_asgi",
+    "emmett55",
     "sanic",
     "blacksheep",
     "litestar",

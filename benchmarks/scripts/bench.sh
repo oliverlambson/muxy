@@ -229,6 +229,8 @@ EOF
     echo "," >>"$temp_file"
     benchmark_framework "muxy_asgi" "asgi" "$temp_file"
     echo "," >>"$temp_file"
+    benchmark_framework "emmett55" "rsgi" "$temp_file"
+    echo "," >>"$temp_file"
     benchmark_framework "muxy" "rsgi" "$temp_file"
 
     # close json
