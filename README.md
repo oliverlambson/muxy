@@ -40,6 +40,7 @@ async def home(s: HTTPScope, p: HTTPProtocol) -> None:
 async def main() -> None:
     router = Router()
     router.get("/", home)
+    router.finalize()
 
     server = Server(router)
     await server.serve()
