@@ -1,76 +1,10 @@
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
-from typing import Literal
+from collections.abc import Callable
 
 import pytest
+from conftest import MockHTTPProtocol, mock_scope
 
 from muxy.router import Router, path_params
-from muxy.rsgi import HTTPProtocol, HTTPScope, HTTPStreamTransport, RSGIHandler
-
-
-# --- Mock objects -------------------------------------------------------------
-@dataclass
-class MockHTTPScope:
-    proto: Literal["http"] = "http"
-    http_version: Literal["1", "1.1", "2"] = "1.1"
-    rsgi_version: str = "1.0"
-    server: str = "localhost"
-    client: str = "127.0.0.1"
-    scheme: str = "http"
-    method: str = "GET"
-    path: str = "/"
-    query_string: str = ""
-    headers: Mapping[str, str] = field(default_factory=dict)
-    authority: str | None = None
-
-
-class MockHTTPProtocol:
-    async def __call__(self) -> bytes:
-        raise NotImplementedError
-
-    def __aiter__(self) -> bytes:
-        raise NotImplementedError
-
-    async def client_disconnect(self) -> None:
-        raise NotImplementedError
-
-    def response_empty(self, status: int, headers: list[tuple[str, str]]) -> None:
-        raise NotImplementedError
-
-    def response_str(
-        self, status: int, headers: list[tuple[str, str]], body: str
-    ) -> None:
-        raise NotImplementedError
-
-    def response_bytes(
-        self, status: int, headers: list[tuple[str, str]], body: bytes
-    ) -> None:
-        raise NotImplementedError
-
-    def response_file(
-        self, status: int, headers: list[tuple[str, str]], file: str
-    ) -> None:
-        raise NotImplementedError
-
-    def response_file_range(
-        self,
-        status: int,
-        headers: list[tuple[str, str]],
-        file: str,
-        start: int,
-        end: int,
-    ) -> None:
-        raise NotImplementedError
-
-    def response_stream(
-        self, status: int, headers: list[tuple[str, str]]
-    ) -> HTTPStreamTransport:
-        raise NotImplementedError
-
-
-def mock_scope(path: str = "/", method: str = "GET") -> HTTPScope:
-    return MockHTTPScope(path=path, method=method)
-
+from muxy.rsgi import HTTPProtocol, HTTPScope, RSGIHandler
 
 mock_proto = MockHTTPProtocol()
 
