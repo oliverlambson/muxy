@@ -137,7 +137,9 @@ class HTTPProtocol(Protocol):
     def response_bytes(
         self, status: int, headers: list[tuple[str, str]], body: bytes
     ) -> None: ...
-    def response_file(self, status: int, headers: list[tuple[str, str]], file: str):
+    def response_file(
+        self, status: int, headers: list[tuple[str, str]], file: str
+    ) -> None:
         """send back contents of file using path for file, application must still set
         correct headers for file"""
         ...
