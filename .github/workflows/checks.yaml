@@ -1,0 +1,27 @@
+name: checks
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+
+concurrency:
+  group: ${{ github.ref }}-ci
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: pyproject.toml
+      - run: uv run ruff format --check
+      - run: uv run ruff check
+      - run: uv run ty check src tests
+      - run: uv run pytest tests
