@@ -30,6 +30,7 @@ chi's `Mux`.
 ```python
 import asyncio
 
+import uvloop
 from granian.server.embed import Server
 from muxy import Router
 from muxy.rsgi import HTTPProtocol, HTTPScope
@@ -48,7 +49,7 @@ async def main() -> None:
         await server.shutdown()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    uvloop.run(main())
 ```
 
 **Bigger app**
@@ -61,6 +62,7 @@ import json
 import sqlite3
 from json.decoder import JSONDecodeError
 
+import uvloop
 from granian.server.embed import Server
 
 from muxy import Router, path_params
@@ -157,5 +159,5 @@ def update_user(db: sqlite3.Connection) -> RSGIHTTPHandler: ...
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    uvloop.run(main())
 ```

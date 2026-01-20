@@ -18,6 +18,7 @@ import sys
 from typing import cast
 
 import httpx
+import uvloop
 from granian.rsgi import HTTPProtocol, Scope, WebsocketProtocol
 from granian.server.embed import Server
 from httpx_ws import aconnect_ws
@@ -100,4 +101,4 @@ async def requests() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    uvloop.run(main())

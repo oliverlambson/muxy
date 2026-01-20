@@ -18,6 +18,7 @@ import sys
 from typing import TYPE_CHECKING
 
 import httpx
+import uvloop
 from granian.rsgi import ProtocolClosed
 from granian.server.embed import Server
 
@@ -127,4 +128,4 @@ async def requests() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    uvloop.run(main())

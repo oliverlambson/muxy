@@ -16,6 +16,7 @@ import logging
 import sqlite3
 from json.decoder import JSONDecodeError
 
+import uvloop
 from granian.server.embed import Server
 
 from muxy import Router, path_params
@@ -221,4 +222,4 @@ def create_product(db: sqlite3.Connection) -> RSGIHTTPHandler:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    uvloop.run(main())
