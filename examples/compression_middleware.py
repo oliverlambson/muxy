@@ -100,7 +100,7 @@ async def serve() -> None:
     try:
         await server.serve()
     except asyncio.CancelledError:
-        print("server shutdown", flush=True, file=sys.stderr)
+        await server.shutdown()
 
 
 async def requests() -> None:

@@ -42,7 +42,10 @@ async def main() -> None:
     router.get("/", home)
 
     server = Server(router)
-    await server.serve()
+    try:
+        await server.serve()
+    except asyncio.CancelledError:
+        await server.shutdown()
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -75,7 +78,10 @@ async def main() -> None:
     router.finalize()
 
     server = Server(router)
-    await server.serve()
+    try:
+        await server.serve()
+    except asyncio.CancelledError:
+        await server.shutdown()
 
 
 async def not_found(_scope: HTTPScope, proto: HTTPProtocol) -> None:

@@ -52,7 +52,7 @@ async def main() -> None:
     try:
         await server.serve()
     except asyncio.CancelledError:
-        pass
+        await server.shutdown()
 
 
 async def not_found(_scope: HTTPScope, proto: HTTPProtocol) -> None:
