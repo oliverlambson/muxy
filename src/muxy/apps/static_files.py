@@ -188,8 +188,16 @@ def _build_file_entries(
     directory: Path,
     encodings: tuple[str, ...],
     compressible_extensions: frozenset[str],
+    outdir: Path | None = None,
 ) -> tuple[dict[str, str], dict[str, FileEntry], _BuildStats]:
     """Walk directory and build file entries with compressed variants.
+
+    Args:
+        directory: Source directory containing static files
+        encodings: Compression encodings to use
+        compressible_extensions: File extensions to compress
+        outdir: Optional output directory for CAS files. If None, files are
+            written alongside originals in the source directory.
 
     Returns:
         (path_to_url, hash_to_entry, stats) tuple
@@ -221,24 +229,53 @@ def _build_file_entries(
         stats.files_total += 1
         stats.original_bytes += len(content)
 
-        # Precompute URL
-        url = f"/{path_stem}.{content_hash}{ext}"
+        # Precompute URL (uses hashed filename)
+        hashed_filename = f"{path_stem}.{content_hash}{ext}"
+        url = f"/{hashed_filename}"
+
+        # Determine output base path for variants
+        if outdir is not None:
+            # Output to separate directory with hashed filename
+            out_base = outdir / hashed_filename
+            out_base.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            # Output alongside original (no hashed filename for identity)
+            out_base = None
 
         # Create identity variant
-        variants: dict[str, FileVariant] = {
-            "identity": FileVariant(
-                path_str=str(file_path),
-                encoding="identity",
-                size=len(content),
-            )
-        }
+        if outdir is not None:
+            # Copy original to outdir with hashed name
+            identity_path = outdir / hashed_filename
+            if not identity_path.exists():
+                identity_path.write_bytes(content)
+            variants: dict[str, FileVariant] = {
+                "identity": FileVariant(
+                    path_str=str(identity_path),
+                    encoding="identity",
+                    size=len(content),
+                )
+            }
+        else:
+            # Use original file as identity
+            variants = {
+                "identity": FileVariant(
+                    path_str=str(file_path),
+                    encoding="identity",
+                    size=len(content),
+                )
+            }
 
         # Compress if extension is compressible
         file_got_variant = False
         if ext.lower() in compressible_extensions:
             for encoding in encodings:
                 suffix = _ENCODING_SUFFIXES[encoding]
-                compressed_path = file_path.with_suffix(ext + suffix)
+
+                # Determine compressed file path
+                if outdir is not None:
+                    compressed_path = outdir / f"{hashed_filename}{suffix}"
+                else:
+                    compressed_path = file_path.with_suffix(ext + suffix)
 
                 # Skip compression if file already exists
                 if compressed_path.exists():
@@ -295,17 +332,20 @@ def _build_file_entries(
 def prepare(
     directory: Path,
     *,
+    outdir: Path | None = None,
     encodings: Iterable[Encoding] = ("zstd", "br", "gzip"),
     compressible_extensions: Iterable[str] = DEFAULT_COMPRESSIBLE_EXTENSIONS,
 ) -> dict[str, str]:
     """Pre-compress static files and return path-to-URL mapping.
 
     Use this to bake compressed files into Docker images at build time,
-    or to prepare files for CDN upload. The compressed files are written
-    to disk alongside the originals (e.g., styles.css.gz, styles.css.br).
+    or to prepare files for CDN upload.
 
     Args:
-        directory: Path to the static files directory
+        directory: Path to the source static files directory
+        outdir: Optional output directory for CAS files. If provided, hashed
+            files and compressed variants are written here, keeping source
+            files clean. If None, files are written alongside originals.
         encodings: Compression encodings to create, in priority order.
             Default: ("zstd", "br", "gzip")
         compressible_extensions: File extensions to compress.
@@ -320,16 +360,20 @@ def prepare(
         from pathlib import Path
         from muxy.apps.static_files import prepare
 
-        manifest = prepare(Path("./static"))
-        # Files are now compressed, manifest can be used for CDN uploads
+        # Separate source and output directories
+        manifest = prepare(Path("./static/src"), outdir=Path("./static/dist"))
+        # Source files unchanged, CAS files in ./static/dist/
         # {"styles.css": "/styles.a1b2c3d4.css", ...}
     """
     encodings_tuple = tuple(encodings)
     compressible_set = frozenset(compressible_extensions)
 
+    if outdir is not None:
+        outdir.mkdir(parents=True, exist_ok=True)
+
     start_time = time.perf_counter()
     path_to_url, _, stats = _build_file_entries(
-        directory, encodings_tuple, compressible_set
+        directory, encodings_tuple, compressible_set, outdir
     )
     elapsed_ms = (time.perf_counter() - start_time) * 1000
 
@@ -387,6 +431,7 @@ def _parse_hashed_path(path: str) -> tuple[str, str, str] | None:
 def static_files(
     directory: Path,
     *,
+    outdir: Path | None = None,
     prefix: str | None = None,
     encodings: Iterable[Encoding] = ("zstd", "br", "gzip"),
     compressible_extensions: Iterable[str] = DEFAULT_COMPRESSIBLE_EXTENSIONS,
@@ -398,7 +443,10 @@ def static_files(
     e.g., `/styles.a1b2c3d4.css`
 
     Args:
-        directory: Path to the static files directory
+        directory: Path to the source static files directory
+        outdir: Optional output directory for CAS files. If provided, hashed
+            files and compressed variants are written here, keeping source
+            files clean. If None, files are written alongside originals.
         prefix: URL prefix for mounting. Controls path extraction strategy:
             - None (default): Uses muxy's path_params from {path...} capture.
               Requires muxy and mounting with a catchall route.
@@ -420,7 +468,12 @@ def static_files(
         from muxy import Router
         from muxy.apps.static_files import static_files
 
-        static_app, static_url = static_files(Path("./static"), prefix="/static")
+        # With separate source and output directories
+        static_app, static_url = static_files(
+            Path("./static/src"),
+            outdir=Path("./static/dist"),
+            prefix="/static",
+        )
         router = Router()
         router.get("/static/{path...}", static_app)
 
@@ -436,13 +489,16 @@ def static_files(
     if prefix is not None:
         prefix = prefix.rstrip("/")
 
+    if outdir is not None:
+        outdir.mkdir(parents=True, exist_ok=True)
+
     # Build server priority map (lower = higher priority)
     server_priority = {enc: i for i, enc in enumerate(encodings_tuple)}
 
     # Pre-compress files and build mappings at startup
     start_time = time.perf_counter()
     path_to_url, hash_to_entry, stats = _build_file_entries(
-        directory, encodings_tuple, compressible_set
+        directory, encodings_tuple, compressible_set, outdir
     )
     elapsed_ms = (time.perf_counter() - start_time) * 1000
 

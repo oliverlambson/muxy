@@ -796,6 +796,147 @@ class TestPrepare:
         assert css_gz.stat().st_mtime == original_mtime
 
 
+# --- Integration tests: outdir parameter -------------------------------------
+class TestOutdir:
+    """Tests for the outdir parameter (separate source and output directories)."""
+
+    @pytest.fixture
+    def source_dir(self, tmp_path: Path) -> Path:
+        """Create a separate source directory for outdir tests."""
+        src = tmp_path / "src"
+        src.mkdir()
+
+        # Compressible files
+        css = src / "styles.css"
+        css.write_text("body { color: red; }" + " " * 500)
+
+        js = src / "app.js"
+        js.write_text("console.log('hello');" + " " * 500)
+
+        # Nested file
+        subdir = src / "lib"
+        subdir.mkdir()
+        nested = subdir / "utils.js"
+        nested.write_text("export const x = 1;" + " " * 500)
+
+        # Non-compressible file
+        img = src / "logo.png"
+        img.write_bytes(b"\x89PNG\r\n" + b"x" * 100)
+
+        return src
+
+    def test_prepare_writes_to_outdir(self, source_dir: Path, tmp_path: Path) -> None:
+        """prepare() with outdir writes CAS files to output directory."""
+        outdir = tmp_path / "dist"
+        manifest = prepare(source_dir, outdir=outdir)
+
+        # Source directory should be unchanged (no .gz files)
+        assert not (source_dir / "styles.css.gz").exists()
+        assert not (source_dir / "styles.css.zst").exists()
+
+        # Output directory should have hashed files
+        css_url = manifest["styles.css"]
+        css_hash = css_url.split(".")[1]  # e.g., "/styles.a1b2c3d4.css" -> "a1b2c3d4"
+
+        # Identity file (hashed name)
+        identity_path = outdir / f"styles.{css_hash}.css"
+        assert identity_path.exists()
+
+        # Compressed variants
+        assert (outdir / f"styles.{css_hash}.css.zst").exists()
+        assert (outdir / f"styles.{css_hash}.css.br").exists()
+        assert (outdir / f"styles.{css_hash}.css.gz").exists()
+
+    def test_prepare_preserves_nested_structure(
+        self, source_dir: Path, tmp_path: Path
+    ) -> None:
+        """prepare() with outdir preserves directory structure."""
+        outdir = tmp_path / "dist"
+        manifest = prepare(source_dir, outdir=outdir)
+
+        # Nested file should be in nested directory
+        js_url = manifest["lib/utils.js"]
+        js_hash = js_url.split(".")[1]  # "/lib/utils.a1b2c3d4.js" -> "a1b2c3d4"
+
+        assert (outdir / "lib" / f"utils.{js_hash}.js").exists()
+        assert (outdir / "lib" / f"utils.{js_hash}.js.gz").exists()
+
+    def test_prepare_outdir_created_if_missing(
+        self, source_dir: Path, tmp_path: Path
+    ) -> None:
+        """prepare() creates outdir if it doesn't exist."""
+        outdir = tmp_path / "nested" / "deep" / "dist"
+        assert not outdir.exists()
+
+        prepare(source_dir, outdir=outdir)
+
+        assert outdir.exists()
+        assert outdir.is_dir()
+
+    @pytest.mark.asyncio
+    async def test_static_files_serves_from_outdir(
+        self, source_dir: Path, tmp_path: Path
+    ) -> None:
+        """static_files() with outdir serves files from output directory."""
+        outdir = tmp_path / "dist"
+        app, url_path = static_files(source_dir, outdir=outdir, prefix="/static")
+
+        url = url_path("styles.css")
+        assert url is not None
+
+        # Verify file is served from outdir
+        proto = MockHTTPProtocol()
+        scope = mock_scope(path=url, headers={"accept-encoding": "gzip"})
+        await app(scope, proto)
+
+        assert proto.response_status == 200
+        assert proto.response_file_path is not None
+        # File should be in outdir, not source_dir
+        assert str(outdir) in proto.response_file_path
+        assert str(source_dir) not in proto.response_file_path
+
+    def test_outdir_reuses_existing_files(
+        self, source_dir: Path, tmp_path: Path
+    ) -> None:
+        """prepare() with outdir reuses existing compressed files."""
+        outdir = tmp_path / "dist"
+
+        # First call creates files
+        manifest = prepare(source_dir, outdir=outdir)
+
+        css_url = manifest["styles.css"]
+        css_hash = css_url.split(".")[1]
+        css_gz = outdir / f"styles.{css_hash}.css.gz"
+        assert css_gz.exists()
+        original_mtime = css_gz.stat().st_mtime
+
+        import time
+
+        time.sleep(0.01)
+
+        # Second call should reuse existing files
+        prepare(source_dir, outdir=outdir)
+
+        assert css_gz.stat().st_mtime == original_mtime
+
+    def test_outdir_non_compressible_files(
+        self, source_dir: Path, tmp_path: Path
+    ) -> None:
+        """Non-compressible files are copied to outdir with hashed name."""
+        outdir = tmp_path / "dist"
+        manifest = prepare(source_dir, outdir=outdir)
+
+        # PNG should be in outdir with hashed name (no compressed variants)
+        png_url = manifest["logo.png"]
+        png_hash = png_url.split(".")[1]
+
+        identity_path = outdir / f"logo.{png_hash}.png"
+        assert identity_path.exists()
+
+        # No compressed variants for non-compressible
+        assert not (outdir / f"logo.{png_hash}.png.gz").exists()
+
+
 # --- Default values tests ----------------------------------------------------
 def test_default_compressible_extensions() -> None:
     """Test default compressible extensions are sensible."""
