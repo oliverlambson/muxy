@@ -1,10 +1,13 @@
 # /// script
 # requires-python = ">=3.14"
 # dependencies = [
-#     "muxy[compress] @ file:///${PROJECT_ROOT}/../muxy",
+#     "muxy[compress]",
 #     "granian[uvloop]>=2.6.0,<3.0.0",
 #     "httpx>=0.28.1,<0.29.0",
 # ]
+#
+# [tool.uv.sources]
+# muxy = { path = "../", editable = true }
 # ///
 """RSGI compression middleware demo.
 

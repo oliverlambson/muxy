@@ -1,9 +1,12 @@
 # /// script
 # requires-python = ">=3.14"
 # dependencies = [
-#     "muxy @ file:///${PROJECT_ROOT}/../muxy",
+#     "muxy",
 #     "granian[uvloop]>=2.6.0,<3.0.0",
 # ]
+#
+# [tool.uv.sources]
+# muxy = { path = "../", editable = true }
 # ///
 """RSGI server demo.
 

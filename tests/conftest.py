@@ -43,6 +43,7 @@ class MockHTTPProtocol:
         self.response_status: int | None = None
         self.response_headers: list[tuple[str, str]] | None = None
         self.response_body: bytes | None = None
+        self.response_file_path: str | None = None
         self.stream_transport: MockHTTPStreamTransport | None = None
 
     async def __call__(self) -> bytes:
@@ -76,7 +77,9 @@ class MockHTTPProtocol:
     def response_file(
         self, status: int, headers: list[tuple[str, str]], file: str
     ) -> None:
-        raise NotImplementedError
+        self.response_status = status
+        self.response_headers = headers
+        self.response_file_path = file
 
     def response_file_range(
         self,
