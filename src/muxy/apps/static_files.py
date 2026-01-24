@@ -579,7 +579,9 @@ def static_files(
             entry = path_to_entry.get(lookup_path)
             if entry is not None:
                 # Redirect to canonical hashed URL (302 not cached)
-                redirect_url = _url_prefix + entry.url
+                # Derive prefix from actual request path (handles muxy mode)
+                request_prefix = scope.path[: -len(raw_path)] if raw_path else ""
+                redirect_url = request_prefix + entry.url
                 proto.response_empty(
                     302,
                     [("location", redirect_url), ("cache-control", "no-cache")],
