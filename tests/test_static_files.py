@@ -221,6 +221,45 @@ class TestStaticFilesStartup:
         # mtime should be unchanged (file wasn't rewritten)
         assert css_gz.stat().st_mtime == original_mtime
 
+    def test_follows_symlinks_to_files(self, static_dir: Path, tmp_path: Path) -> None:
+        """Symlinks to files are followed."""
+        # Create a file outside the static directory
+        external_file = tmp_path / "external" / "external.css"
+        external_file.parent.mkdir()
+        external_file.write_text("body { color: blue; }" + " " * 500)
+
+        # Create a symlink to it inside static_dir
+        symlink = static_dir / "linked.css"
+        symlink.symlink_to(external_file)
+
+        _app, url_path = static_files(static_dir, prefix="")
+
+        # Should find the symlinked file
+        url = url_path("linked.css")
+        assert url is not None
+        assert url.endswith(".css")
+
+    def test_follows_symlinks_to_directories(
+        self, static_dir: Path, tmp_path: Path
+    ) -> None:
+        """Symlinks to directories are followed."""
+        # Create a directory with files outside static_dir
+        external_dir = tmp_path / "external_lib"
+        external_dir.mkdir()
+        external_js = external_dir / "external.js"
+        external_js.write_text("export const foo = 1;" + " " * 500)
+
+        # Create a symlink to the directory inside static_dir
+        symlink_dir = static_dir / "external"
+        symlink_dir.symlink_to(external_dir)
+
+        _app, url_path = static_files(static_dir, prefix="")
+
+        # Should find files inside the symlinked directory
+        url = url_path("external/external.js")
+        assert url is not None
+        assert url.endswith(".js")
+
 
 # --- Integration tests: url_path Function ------------------------------------
 class TestUrlPath:

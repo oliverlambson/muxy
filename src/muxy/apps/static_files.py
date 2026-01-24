@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import mimetypes
+import os
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -206,125 +207,124 @@ def _build_file_entries(
     hash_to_entry: dict[str, FileEntry] = {}
     stats = _BuildStats()
 
-    for file_path in directory.rglob("*"):
-        # Skip directories
-        if file_path.is_dir():
-            continue
+    for dirpath, _dirnames, filenames in os.walk(directory, followlinks=True):
+        for filename in filenames:
+            file_path = Path(dirpath) / filename
 
-        # Skip existing compressed files
-        if file_path.suffix in _COMPRESSED_SUFFIXES:
-            continue
+            # Skip existing compressed files
+            if file_path.suffix in _COMPRESSED_SUFFIXES:
+                continue
 
-        # Compute relative path and stem (without extension)
-        rel_path = file_path.relative_to(directory)
-        rel_path_str = str(rel_path)
-        path_stem = str(rel_path.with_suffix(""))
-        ext = file_path.suffix
+            # Compute relative path and stem (without extension)
+            rel_path = file_path.relative_to(directory)
+            rel_path_str = str(rel_path)
+            path_stem = str(rel_path.with_suffix(""))
+            ext = file_path.suffix
 
-        # Read file and compute hash
-        content = file_path.read_bytes()
-        content_hash = hashlib.sha256(content).hexdigest()[:8]
+            # Read file and compute hash
+            content = file_path.read_bytes()
+            content_hash = hashlib.sha256(content).hexdigest()[:8]
 
-        # Track stats
-        stats.files_total += 1
-        stats.original_bytes += len(content)
+            # Track stats
+            stats.files_total += 1
+            stats.original_bytes += len(content)
 
-        # Precompute URL (uses hashed filename)
-        hashed_filename = f"{path_stem}.{content_hash}{ext}"
-        url = f"/{hashed_filename}"
+            # Precompute URL (uses hashed filename)
+            hashed_filename = f"{path_stem}.{content_hash}{ext}"
+            url = f"/{hashed_filename}"
 
-        # Determine output base path for variants
-        if outdir is not None:
-            # Output to separate directory with hashed filename
-            out_base = outdir / hashed_filename
-            out_base.parent.mkdir(parents=True, exist_ok=True)
-        else:
-            # Output alongside original (no hashed filename for identity)
-            out_base = None
+            # Determine output base path for variants
+            if outdir is not None:
+                # Output to separate directory with hashed filename
+                out_base = outdir / hashed_filename
+                out_base.parent.mkdir(parents=True, exist_ok=True)
+            else:
+                # Output alongside original (no hashed filename for identity)
+                out_base = None
 
-        # Create identity variant
-        if outdir is not None:
-            # Copy original to outdir with hashed name
-            identity_path = outdir / hashed_filename
-            if not identity_path.exists():
-                identity_path.write_bytes(content)
-            variants: dict[str, FileVariant] = {
-                "identity": FileVariant(
-                    path_str=str(identity_path),
-                    encoding="identity",
-                    size=len(content),
-                )
-            }
-        else:
-            # Use original file as identity
-            variants = {
-                "identity": FileVariant(
-                    path_str=str(file_path),
-                    encoding="identity",
-                    size=len(content),
-                )
-            }
+            # Create identity variant
+            if outdir is not None:
+                # Copy original to outdir with hashed name
+                identity_path = outdir / hashed_filename
+                if not identity_path.exists():
+                    identity_path.write_bytes(content)
+                variants: dict[str, FileVariant] = {
+                    "identity": FileVariant(
+                        path_str=str(identity_path),
+                        encoding="identity",
+                        size=len(content),
+                    )
+                }
+            else:
+                # Use original file as identity
+                variants = {
+                    "identity": FileVariant(
+                        path_str=str(file_path),
+                        encoding="identity",
+                        size=len(content),
+                    )
+                }
 
-        # Compress if extension is compressible
-        file_got_variant = False
-        if ext.lower() in compressible_extensions:
-            for encoding in encodings:
-                suffix = _ENCODING_SUFFIXES[encoding]
+            # Compress if extension is compressible
+            file_got_variant = False
+            if ext.lower() in compressible_extensions:
+                for encoding in encodings:
+                    suffix = _ENCODING_SUFFIXES[encoding]
 
-                # Determine compressed file path
-                if outdir is not None:
-                    compressed_path = outdir / f"{hashed_filename}{suffix}"
-                else:
-                    compressed_path = file_path.with_suffix(ext + suffix)
+                    # Determine compressed file path
+                    if outdir is not None:
+                        compressed_path = outdir / f"{hashed_filename}{suffix}"
+                    else:
+                        compressed_path = file_path.with_suffix(ext + suffix)
 
-                # Skip compression if file already exists
-                if compressed_path.exists():
-                    size = compressed_path.stat().st_size
-                    if size < len(content):
+                    # Skip compression if file already exists
+                    if compressed_path.exists():
+                        size = compressed_path.stat().st_size
+                        if size < len(content):
+                            variants[encoding] = FileVariant(
+                                path_str=str(compressed_path),
+                                encoding=encoding,
+                                size=size,
+                            )
+                            stats.variants_reused += 1
+                            stats.compressed_bytes += size
+                            file_got_variant = True
+                        else:
+                            stats.variants_skipped += 1
+                        continue
+
+                    compressed = _compress_file(content, encoding)
+                    # Only store if smaller than original
+                    if len(compressed) < len(content):
+                        compressed_path.write_bytes(compressed)
                         variants[encoding] = FileVariant(
                             path_str=str(compressed_path),
                             encoding=encoding,
-                            size=size,
+                            size=len(compressed),
                         )
-                        stats.variants_reused += 1
-                        stats.compressed_bytes += size
+                        stats.variants_created += 1
+                        stats.compressed_bytes += len(compressed)
                         file_got_variant = True
                     else:
                         stats.variants_skipped += 1
-                    continue
 
-                compressed = _compress_file(content, encoding)
-                # Only store if smaller than original
-                if len(compressed) < len(content):
-                    compressed_path.write_bytes(compressed)
-                    variants[encoding] = FileVariant(
-                        path_str=str(compressed_path),
-                        encoding=encoding,
-                        size=len(compressed),
-                    )
-                    stats.variants_created += 1
-                    stats.compressed_bytes += len(compressed)
-                    file_got_variant = True
-                else:
-                    stats.variants_skipped += 1
+            if file_got_variant:
+                stats.files_compressed += 1
 
-        if file_got_variant:
-            stats.files_compressed += 1
+            # Get content type
+            content_type = _get_content_type(file_path)
 
-        # Get content type
-        content_type = _get_content_type(file_path)
+            # Create entry
+            entry = FileEntry(
+                content_type=content_type,
+                content_hash=content_hash,
+                variants=variants,
+                url=url,
+                path_stem=path_stem,
+            )
 
-        # Create entry
-        entry = FileEntry(
-            content_type=content_type,
-            content_hash=content_hash,
-            variants=variants,
-            url=url,
-            path_stem=path_stem,
-        )
-
-        path_to_url[rel_path_str] = url
-        hash_to_entry[content_hash] = entry
+            path_to_url[rel_path_str] = url
+            hash_to_entry[content_hash] = entry
 
     return path_to_url, hash_to_entry, stats
 
