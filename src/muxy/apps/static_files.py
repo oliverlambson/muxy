@@ -437,6 +437,7 @@ def static_files(
     prefix: str | None = None,
     encodings: Iterable[Encoding] = ("zstd", "br", "gzip"),
     compressible_extensions: Iterable[str] = DEFAULT_COMPRESSIBLE_EXTENSIONS,
+    canonical_redirect: bool = True,
 ) -> tuple[RSGIHTTPHandler, UrlPathFn]:
     """Create a compressed static files app using content-addressable storage.
 
@@ -459,6 +460,10 @@ def static_files(
             Default: ("zstd", "br", "gzip")
         compressible_extensions: File extensions to compress.
             Default: DEFAULT_COMPRESSIBLE_EXTENSIONS
+        canonical_redirect: When True (default), non-hashed paths redirect to
+            their canonical hashed URLs. When False, non-hashed paths are served
+            directly with no-cache headers. Set to False for source maps or
+            other files where clients don't follow redirects.
 
     Returns:
         (app, url_path) tuple where:
@@ -573,20 +578,34 @@ def static_files(
             if entry is None or name_base != entry.path_stem:
                 entry = None
 
-        # Fall back to original path lookup - redirect to hashed URL
+        # Fall back to original path lookup
         if entry is None:
             lookup_path = raw_path[1:]  # Strip leading slash
             entry = path_to_entry.get(lookup_path)
             if entry is not None:
-                # Redirect to canonical hashed URL (302 not cached)
-                # Derive prefix from actual request path (handles muxy mode)
-                request_prefix = scope.path[: -len(raw_path)] if raw_path else ""
-                redirect_url = request_prefix + entry.url
-                proto.response_empty(
-                    302,
-                    [("location", redirect_url), ("cache-control", "no-cache")],
-                )
-                return
+                if canonical_redirect:
+                    # Redirect to canonical hashed URL (302 not cached)
+                    # Derive prefix from actual request path (handles muxy mode)
+                    request_prefix = scope.path[: -len(raw_path)] if raw_path else ""
+                    redirect_url = request_prefix + entry.url
+                    proto.response_empty(
+                        302,
+                        [("location", redirect_url), ("cache-control", "no-cache")],
+                    )
+                    return
+                else:
+                    # Serve directly with no-cache (for source maps, etc.)
+                    variant = entry.variants["identity"]
+                    proto.response_file(
+                        200,
+                        [
+                            ("content-type", entry.content_type),
+                            ("content-length", str(variant.size)),
+                            ("cache-control", "public, max-age=0, must-revalidate"),
+                        ],
+                        variant.path_str,
+                    )
+                    return
 
         if entry is None:
             proto.response_bytes(404, [("content-type", "text/plain")], b"Not found")

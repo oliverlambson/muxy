@@ -603,6 +603,42 @@ class TestNonHashedPaths:
         headers_dict = dict(proto.response_headers or [])
         assert headers_dict.get("location") == expected_url
 
+    @pytest.mark.asyncio
+    async def test_canonical_redirect_false_serves_directly(
+        self, static_dir: Path
+    ) -> None:
+        """canonical_redirect=False serves non-hashed paths directly."""
+        app, _url_path = static_files(
+            static_dir, prefix="/static", canonical_redirect=False
+        )
+
+        proto = MockHTTPProtocol()
+        scope = mock_scope(path="/static/styles.css", headers={})
+        await app(scope, proto)
+
+        # Should be 200, not 302 redirect
+        assert proto.response_status == 200
+        headers_dict = dict(proto.response_headers or [])
+        assert headers_dict.get("cache-control") == "public, max-age=0, must-revalidate"
+
+    @pytest.mark.asyncio
+    async def test_canonical_redirect_true_redirects(self, static_dir: Path) -> None:
+        """canonical_redirect=True (default) redirects non-hashed paths."""
+        app, url_path = static_files(
+            static_dir, prefix="/static", canonical_redirect=True
+        )
+        expected_url = url_path("styles.css")
+        assert expected_url is not None
+
+        proto = MockHTTPProtocol()
+        scope = mock_scope(path="/static/styles.css", headers={})
+        await app(scope, proto)
+
+        # Should redirect to hashed URL
+        assert proto.response_status == 302
+        headers_dict = dict(proto.response_headers or [])
+        assert headers_dict.get("location") == expected_url
+
 
 # --- Integration tests: Custom Configuration ---------------------------------
 class TestCustomConfiguration:
