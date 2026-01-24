@@ -190,7 +190,7 @@ def _build_file_entries(
     encodings: tuple[str, ...],
     compressible_extensions: frozenset[str],
     outdir: Path | None = None,
-) -> tuple[dict[str, str], dict[str, FileEntry], _BuildStats]:
+) -> tuple[dict[str, str], dict[str, FileEntry], dict[str, FileEntry], _BuildStats]:
     """Walk directory and build file entries with compressed variants.
 
     Args:
@@ -201,10 +201,11 @@ def _build_file_entries(
             written alongside originals in the source directory.
 
     Returns:
-        (path_to_url, hash_to_entry, stats) tuple
+        (path_to_url, hash_to_entry, path_to_entry, stats) tuple
     """
     path_to_url: dict[str, str] = {}
     hash_to_entry: dict[str, FileEntry] = {}
+    path_to_entry: dict[str, FileEntry] = {}
     stats = _BuildStats()
 
     for dirpath, _dirnames, filenames in os.walk(directory, followlinks=True):
@@ -325,8 +326,9 @@ def _build_file_entries(
 
             path_to_url[rel_path_str] = url
             hash_to_entry[content_hash] = entry
+            path_to_entry[rel_path_str] = entry
 
-    return path_to_url, hash_to_entry, stats
+    return path_to_url, hash_to_entry, path_to_entry, stats
 
 
 def prepare(
@@ -372,7 +374,7 @@ def prepare(
         outdir.mkdir(parents=True, exist_ok=True)
 
     start_time = time.perf_counter()
-    path_to_url, _, stats = _build_file_entries(
+    path_to_url, _, _, stats = _build_file_entries(
         directory, encodings_tuple, compressible_set, outdir
     )
     elapsed_ms = (time.perf_counter() - start_time) * 1000
@@ -497,7 +499,7 @@ def static_files(
 
     # Pre-compress files and build mappings at startup
     start_time = time.perf_counter()
-    path_to_url, hash_to_entry, stats = _build_file_entries(
+    path_to_url, hash_to_entry, path_to_entry, stats = _build_file_entries(
         directory, encodings_tuple, compressible_set, outdir
     )
     elapsed_ms = (time.perf_counter() - start_time) * 1000
@@ -560,22 +562,26 @@ def static_files(
             if prefix and raw_path.startswith(prefix):
                 raw_path = raw_path[len(prefix) :]
 
-        # Parse the hashed path (string operations only)
+        # Try hashed path first (content-addressable with long cache)
+        entry: FileEntry | None = None
+        use_long_cache = False
+
         parsed = _parse_hashed_path(raw_path)
-        if parsed is None:
-            proto.response_bytes(404, [("content-type", "text/plain")], b"Not found")
-            return
+        if parsed is not None:
+            name_base, content_hash, _ext = parsed
+            entry = hash_to_entry.get(content_hash)
+            # Verify the path matches (precomputed string comparison)
+            if entry is not None and name_base == entry.path_stem:
+                use_long_cache = True
+            else:
+                entry = None
 
-        name_base, content_hash, _ext = parsed
-
-        # Look up entry by hash (single dict lookup)
-        entry = hash_to_entry.get(content_hash)
+        # Fall back to original path lookup (short cache for source maps, etc.)
         if entry is None:
-            proto.response_bytes(404, [("content-type", "text/plain")], b"Not found")
-            return
+            lookup_path = raw_path[1:]  # Strip leading slash for path lookup
+            entry = path_to_entry.get(lookup_path)
 
-        # Verify the path matches (precomputed string comparison)
-        if name_base != entry.path_stem:
+        if entry is None:
             proto.response_bytes(404, [("content-type", "text/plain")], b"Not found")
             return
 
@@ -592,11 +598,16 @@ def static_files(
             variant = entry.variants["identity"]
             selected_encoding = "identity"
 
-        # Build response headers
+        # Build response headers with appropriate cache policy
+        if use_long_cache:
+            cache_control = "public, max-age=31536000, immutable"
+        else:
+            cache_control = "public, max-age=0, must-revalidate"
+
         headers: list[tuple[str, str]] = [
             ("content-type", entry.content_type),
             ("content-length", str(variant.size)),
-            ("cache-control", "public, max-age=31536000, immutable"),
+            ("cache-control", cache_control),
             ("vary", "accept-encoding"),
         ]
 

@@ -499,12 +499,12 @@ class TestResponseHeaders:
 # --- Integration tests: App Handler - Error Cases ----------------------------
 class TestErrorCases:
     @pytest.mark.asyncio
-    async def test_404_invalid_path_format(self, static_dir: Path) -> None:
-        """'/static/styles.css' (no hash) -> 404."""
+    async def test_404_nonexistent_file(self, static_dir: Path) -> None:
+        """'/static/nonexistent.css' -> 404."""
         app, _url_path = static_files(static_dir, prefix="/static")
 
         proto = MockHTTPProtocol()
-        scope = mock_scope(path="/static/styles.css", headers={})
+        scope = mock_scope(path="/static/nonexistent.css", headers={})
         await app(scope, proto)
 
         assert proto.response_status == 404
@@ -537,6 +537,80 @@ class TestErrorCases:
         await app(scope, proto)
 
         assert proto.response_status == 404
+
+
+# --- Integration tests: Non-hashed path serving ------------------------------
+class TestNonHashedPaths:
+    """Tests for serving files via original (non-hashed) paths."""
+
+    @pytest.mark.asyncio
+    async def test_serves_non_hashed_path(self, static_dir: Path) -> None:
+        """'/static/styles.css' serves the file."""
+        app, _url_path = static_files(static_dir, prefix="/static")
+
+        proto = MockHTTPProtocol()
+        scope = mock_scope(path="/static/styles.css", headers={})
+        await app(scope, proto)
+
+        assert proto.response_status == 200
+        headers_dict = dict(proto.response_headers or [])
+        assert headers_dict.get("content-type") == "text/css"
+
+    @pytest.mark.asyncio
+    async def test_non_hashed_uses_short_cache(self, static_dir: Path) -> None:
+        """Non-hashed paths use short cache headers."""
+        app, _url_path = static_files(static_dir, prefix="/static")
+
+        proto = MockHTTPProtocol()
+        scope = mock_scope(path="/static/styles.css", headers={})
+        await app(scope, proto)
+
+        headers_dict = dict(proto.response_headers or [])
+        assert headers_dict.get("cache-control") == "public, max-age=0, must-revalidate"
+
+    @pytest.mark.asyncio
+    async def test_hashed_uses_long_cache(self, static_dir: Path) -> None:
+        """Hashed paths use long cache headers."""
+        app, url_path = static_files(static_dir, prefix="/static")
+        url = url_path("styles.css")
+        assert url is not None
+
+        proto = MockHTTPProtocol()
+        scope = mock_scope(path=url, headers={})
+        await app(scope, proto)
+
+        headers_dict = dict(proto.response_headers or [])
+        assert (
+            headers_dict.get("cache-control") == "public, max-age=31536000, immutable"
+        )
+
+    @pytest.mark.asyncio
+    async def test_non_hashed_nested_path(self, static_dir: Path) -> None:
+        """'/static/lib/utils.js' serves nested files."""
+        app, _url_path = static_files(static_dir, prefix="/static")
+
+        proto = MockHTTPProtocol()
+        scope = mock_scope(path="/static/lib/utils.js", headers={})
+        await app(scope, proto)
+
+        assert proto.response_status == 200
+        headers_dict = dict(proto.response_headers or [])
+        assert headers_dict.get("content-type") == "text/javascript"
+
+    @pytest.mark.asyncio
+    async def test_non_hashed_supports_compression(self, static_dir: Path) -> None:
+        """Non-hashed paths still support content negotiation."""
+        app, _url_path = static_files(static_dir, prefix="/static")
+
+        proto = MockHTTPProtocol()
+        scope = mock_scope(
+            path="/static/styles.css", headers={"accept-encoding": "gzip"}
+        )
+        await app(scope, proto)
+
+        assert proto.response_status == 200
+        headers_dict = dict(proto.response_headers or [])
+        assert headers_dict.get("content-encoding") == "gzip"
 
 
 # --- Integration tests: Custom Configuration ---------------------------------
