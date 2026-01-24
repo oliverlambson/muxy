@@ -564,29 +564,33 @@ def static_files(
 
         # Try hashed path first (content-addressable with long cache)
         entry: FileEntry | None = None
-        use_long_cache = False
 
         parsed = _parse_hashed_path(raw_path)
         if parsed is not None:
             name_base, content_hash, _ext = parsed
             entry = hash_to_entry.get(content_hash)
             # Verify the path matches (precomputed string comparison)
-            if entry is not None and name_base == entry.path_stem:
-                use_long_cache = True
-            else:
+            if entry is None or name_base != entry.path_stem:
                 entry = None
 
-        # Fall back to original path lookup (short cache for source maps, etc.)
+        # Fall back to original path lookup - redirect to hashed URL
         if entry is None:
-            lookup_path = raw_path[1:]  # Strip leading slash for path lookup
+            lookup_path = raw_path[1:]  # Strip leading slash
             entry = path_to_entry.get(lookup_path)
+            if entry is not None:
+                # Redirect to canonical hashed URL (302 not cached)
+                redirect_url = _url_prefix + entry.url
+                proto.response_empty(
+                    302,
+                    [("location", redirect_url), ("cache-control", "no-cache")],
+                )
+                return
 
         if entry is None:
             proto.response_bytes(404, [("content-type", "text/plain")], b"Not found")
             return
 
         # Content negotiation - select best encoding
-        # Uses dict keys directly, no set allocation
         accept_encoding = scope.headers.get("accept-encoding")
         selected_encoding = _select_encoding(
             accept_encoding, server_priority, entry.variants.keys()
@@ -598,16 +602,11 @@ def static_files(
             variant = entry.variants["identity"]
             selected_encoding = "identity"
 
-        # Build response headers with appropriate cache policy
-        if use_long_cache:
-            cache_control = "public, max-age=31536000, immutable"
-        else:
-            cache_control = "public, max-age=0, must-revalidate"
-
+        # Build response headers with immutable cache (hashed URLs only)
         headers: list[tuple[str, str]] = [
             ("content-type", entry.content_type),
             ("content-length", str(variant.size)),
-            ("cache-control", cache_control),
+            ("cache-control", "public, max-age=31536000, immutable"),
             ("vary", "accept-encoding"),
         ]
 

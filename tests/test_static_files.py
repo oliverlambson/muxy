@@ -539,34 +539,37 @@ class TestErrorCases:
         assert proto.response_status == 404
 
 
-# --- Integration tests: Non-hashed path serving ------------------------------
+# --- Integration tests: Non-hashed path serving (redirects) ------------------
 class TestNonHashedPaths:
-    """Tests for serving files via original (non-hashed) paths."""
+    """Tests for non-hashed paths redirecting to hashed URLs."""
 
     @pytest.mark.asyncio
-    async def test_serves_non_hashed_path(self, static_dir: Path) -> None:
-        """'/static/styles.css' serves the file."""
+    async def test_non_hashed_redirects_to_hashed(self, static_dir: Path) -> None:
+        """'/static/styles.css' redirects to hashed URL."""
+        app, url_path = static_files(static_dir, prefix="/static")
+        expected_url = url_path("styles.css")
+        assert expected_url is not None
+
+        proto = MockHTTPProtocol()
+        scope = mock_scope(path="/static/styles.css", headers={})
+        await app(scope, proto)
+
+        assert proto.response_status == 302
+        headers_dict = dict(proto.response_headers or [])
+        assert headers_dict.get("location") == expected_url
+
+    @pytest.mark.asyncio
+    async def test_redirect_not_cached(self, static_dir: Path) -> None:
+        """Redirect response has no-cache header."""
         app, _url_path = static_files(static_dir, prefix="/static")
 
         proto = MockHTTPProtocol()
         scope = mock_scope(path="/static/styles.css", headers={})
         await app(scope, proto)
 
-        assert proto.response_status == 200
+        assert proto.response_status == 302
         headers_dict = dict(proto.response_headers or [])
-        assert headers_dict.get("content-type") == "text/css"
-
-    @pytest.mark.asyncio
-    async def test_non_hashed_uses_short_cache(self, static_dir: Path) -> None:
-        """Non-hashed paths use short cache headers."""
-        app, _url_path = static_files(static_dir, prefix="/static")
-
-        proto = MockHTTPProtocol()
-        scope = mock_scope(path="/static/styles.css", headers={})
-        await app(scope, proto)
-
-        headers_dict = dict(proto.response_headers or [])
-        assert headers_dict.get("cache-control") == "public, max-age=0, must-revalidate"
+        assert headers_dict.get("cache-control") == "no-cache"
 
     @pytest.mark.asyncio
     async def test_hashed_uses_long_cache(self, static_dir: Path) -> None:
@@ -579,38 +582,26 @@ class TestNonHashedPaths:
         scope = mock_scope(path=url, headers={})
         await app(scope, proto)
 
+        assert proto.response_status == 200
         headers_dict = dict(proto.response_headers or [])
         assert (
             headers_dict.get("cache-control") == "public, max-age=31536000, immutable"
         )
 
     @pytest.mark.asyncio
-    async def test_non_hashed_nested_path(self, static_dir: Path) -> None:
-        """'/static/lib/utils.js' serves nested files."""
-        app, _url_path = static_files(static_dir, prefix="/static")
+    async def test_non_hashed_nested_redirects(self, static_dir: Path) -> None:
+        """'/static/lib/utils.js' redirects to hashed URL."""
+        app, url_path = static_files(static_dir, prefix="/static")
+        expected_url = url_path("lib/utils.js")
+        assert expected_url is not None
 
         proto = MockHTTPProtocol()
         scope = mock_scope(path="/static/lib/utils.js", headers={})
         await app(scope, proto)
 
-        assert proto.response_status == 200
+        assert proto.response_status == 302
         headers_dict = dict(proto.response_headers or [])
-        assert headers_dict.get("content-type") == "text/javascript"
-
-    @pytest.mark.asyncio
-    async def test_non_hashed_supports_compression(self, static_dir: Path) -> None:
-        """Non-hashed paths still support content negotiation."""
-        app, _url_path = static_files(static_dir, prefix="/static")
-
-        proto = MockHTTPProtocol()
-        scope = mock_scope(
-            path="/static/styles.css", headers={"accept-encoding": "gzip"}
-        )
-        await app(scope, proto)
-
-        assert proto.response_status == 200
-        headers_dict = dict(proto.response_headers or [])
-        assert headers_dict.get("content-encoding") == "gzip"
+        assert headers_dict.get("location") == expected_url
 
 
 # --- Integration tests: Custom Configuration ---------------------------------
