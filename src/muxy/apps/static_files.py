@@ -208,6 +208,13 @@ def _build_file_entries(
     path_to_entry: dict[str, FileEntry] = {}
     stats = _BuildStats()
 
+    # SECURITY: followlinks=True allows symlinks to be indexed at startup.
+    # This is safe from path traversal (requests only do dict lookups, not fs
+    # access). Note that it's up to the user to ensure the directory doesn't
+    # contain symlinks to sensitive locations, as those files would be indexed
+    # and served. This is considered safe because just as it's the user's
+    # responsibility not to include sensitive files in the static files dir,
+    # they also shouldn't be including symlinks to sensitive files.
     for dirpath, _dirnames, filenames in os.walk(directory, followlinks=True):
         for filename in filenames:
             file_path = Path(dirpath) / filename
