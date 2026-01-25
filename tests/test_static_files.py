@@ -1086,3 +1086,177 @@ def test_default_compressible_extensions() -> None:
     assert ".json" in DEFAULT_COMPRESSIBLE_EXTENSIONS
     assert ".svg" in DEFAULT_COMPRESSIBLE_EXTENSIONS
     assert ".wasm" in DEFAULT_COMPRESSIBLE_EXTENSIONS
+
+
+# --- Integration tests: Source map rewriting ---------------------------------
+class TestSourceMapRewriting:
+    """Tests for sourceMappingURL rewriting in JS/CSS files."""
+
+    @pytest.fixture
+    def sourcemap_dir(self, tmp_path: Path) -> Path:
+        """Create a directory with JS/CSS files and their source maps."""
+        # JS file with sourceMappingURL
+        js = tmp_path / "app.js"
+        js.write_text(
+            "console.log('hello');\n//# sourceMappingURL=app.js.map" + " " * 500
+        )
+
+        # Source map file
+        js_map = tmp_path / "app.js.map"
+        js_map.write_text('{"version":3,"sources":["app.ts"]}' + " " * 500)
+
+        # CSS file with sourceMappingURL
+        css = tmp_path / "styles.css"
+        css.write_text(
+            "body { color: red; }\n/*# sourceMappingURL=styles.css.map */" + " " * 500
+        )
+
+        # CSS source map file
+        css_map = tmp_path / "styles.css.map"
+        css_map.write_text('{"version":3,"sources":["styles.scss"]}' + " " * 500)
+
+        # JS file with missing source map (should remain unchanged)
+        js_missing = tmp_path / "missing.js"
+        js_missing.write_text(
+            "const y = 2;\n//# sourceMappingURL=nonexistent.js.map" + " " * 500
+        )
+
+        return tmp_path
+
+    def test_js_sourcemap_rewritten_to_hashed_path(
+        self, sourcemap_dir: Path, tmp_path: Path
+    ) -> None:
+        """sourceMappingURL in JS files is rewritten to hashed path."""
+        outdir = tmp_path / "dist"
+        manifest = prepare(sourcemap_dir, outdir=outdir)
+
+        # Get the hashed JS file
+        js_url = manifest["app.js"]
+        js_hash = js_url.split(".")[1]  # "/app.{hash}.js" -> hash
+
+        # Read the rewritten JS content
+        js_path = outdir / f"app.{js_hash}.js"
+        content = js_path.read_text()
+
+        # Get the expected hashed map filename
+        map_url = manifest["app.js.map"]
+        map_basename = Path(map_url).name  # "app.js.{hash}.map"
+
+        # Verify sourceMappingURL was rewritten
+        assert f"//# sourceMappingURL={map_basename}" in content
+        assert "//# sourceMappingURL=app.js.map" not in content
+
+    def test_css_sourcemap_rewritten_to_hashed_path(
+        self, sourcemap_dir: Path, tmp_path: Path
+    ) -> None:
+        """sourceMappingURL in CSS files is rewritten to hashed path."""
+        outdir = tmp_path / "dist"
+        manifest = prepare(sourcemap_dir, outdir=outdir)
+
+        # Get the hashed CSS file
+        css_url = manifest["styles.css"]
+        css_hash = css_url.split(".")[1]
+
+        # Read the rewritten CSS content
+        css_path = outdir / f"styles.{css_hash}.css"
+        content = css_path.read_text()
+
+        # Get the expected hashed map filename
+        map_url = manifest["styles.css.map"]
+        map_basename = Path(map_url).name
+
+        # Verify sourceMappingURL was rewritten
+        assert f"/*# sourceMappingURL={map_basename} */" in content
+        assert "/*# sourceMappingURL=styles.css.map */" not in content
+
+    def test_js_hash_reflects_rewritten_content(
+        self, sourcemap_dir: Path, tmp_path: Path
+    ) -> None:
+        """JS file hash changes after sourceMappingURL rewrite."""
+        import hashlib
+
+        outdir = tmp_path / "dist"
+        manifest = prepare(sourcemap_dir, outdir=outdir)
+
+        # Get the hashed JS file
+        js_url = manifest["app.js"]
+        js_hash = js_url.split(".")[1]
+
+        # Read the rewritten JS content
+        js_path = outdir / f"app.{js_hash}.js"
+        content = js_path.read_bytes()
+
+        # Verify the hash matches the actual content
+        expected_hash = hashlib.sha256(content).hexdigest()[:8]
+        assert js_hash == expected_hash
+
+    def test_missing_sourcemap_url_unchanged(
+        self, sourcemap_dir: Path, tmp_path: Path
+    ) -> None:
+        """sourceMappingURL pointing to missing file is left unchanged."""
+        outdir = tmp_path / "dist"
+        manifest = prepare(sourcemap_dir, outdir=outdir)
+
+        # Get the hashed JS file
+        js_url = manifest["missing.js"]
+        js_hash = js_url.split(".")[1]
+
+        # Read the content
+        js_path = outdir / f"missing.{js_hash}.js"
+        content = js_path.read_text()
+
+        # Verify sourceMappingURL was NOT rewritten (nonexistent.js.map doesn't exist)
+        assert "//# sourceMappingURL=nonexistent.js.map" in content
+
+    def test_rewrite_sourcemaps_false_preserves_original(
+        self, sourcemap_dir: Path, tmp_path: Path
+    ) -> None:
+        """rewrite_sourcemaps=False leaves sourceMappingURL unchanged."""
+        outdir = tmp_path / "dist"
+        manifest = prepare(sourcemap_dir, outdir=outdir, rewrite_sourcemaps=False)
+
+        # Get the hashed JS file
+        js_url = manifest["app.js"]
+        js_hash = js_url.split(".")[1]
+
+        # Read the content
+        js_path = outdir / f"app.{js_hash}.js"
+        content = js_path.read_text()
+
+        # Verify sourceMappingURL was NOT rewritten
+        assert "//# sourceMappingURL=app.js.map" in content
+
+    def test_nested_sourcemap_rewriting(self, tmp_path: Path) -> None:
+        """sourceMappingURL in nested directories is rewritten correctly."""
+        src = tmp_path / "src"
+        src.mkdir()
+
+        # Nested JS file
+        subdir = src / "js"
+        subdir.mkdir()
+        js = subdir / "app.js"
+        js.write_text(
+            "console.log('nested');\n//# sourceMappingURL=app.js.map" + " " * 500
+        )
+
+        # Source map in same directory
+        js_map = subdir / "app.js.map"
+        js_map.write_text('{"version":3}' + " " * 500)
+
+        outdir = tmp_path / "dist"
+        manifest = prepare(src, outdir=outdir)
+
+        # Get the hashed JS file
+        js_url = manifest["js/app.js"]
+        js_hash = js_url.split(".")[1]
+
+        # Read the rewritten JS content
+        js_path = outdir / "js" / f"app.{js_hash}.js"
+        content = js_path.read_text()
+
+        # Get the expected hashed map filename (basename only)
+        map_url = manifest["js/app.js.map"]
+        map_basename = Path(map_url).name
+
+        # Verify sourceMappingURL was rewritten with just the filename
+        assert f"//# sourceMappingURL={map_basename}" in content

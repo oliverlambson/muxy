@@ -14,6 +14,7 @@ import hashlib
 import logging
 import mimetypes
 import os
+import re
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -104,6 +105,41 @@ _ENCODING_SUFFIXES: dict[str, str] = {"zstd": ".zst", "br": ".br", "gzip": ".gz"
 # Max compression levels for each encoding
 _MAX_LEVELS: dict[str, int] = {"zstd": 22, "br": 11, "gzip": 9}
 
+# Regex patterns for source map references
+_SOURCEMAP_JS_RE = re.compile(rb"//[#@]\s*sourceMappingURL=(\S+)")
+_SOURCEMAP_CSS_RE = re.compile(rb"/\*[#@]\s*sourceMappingURL=(\S+?)\s*\*/")
+
+# File extensions that may contain sourceMappingURL
+_SOURCEMAP_EXTENSIONS: frozenset[str] = frozenset({".js", ".mjs", ".cjs", ".css"})
+
+
+def _find_sourcemap_reference(content: bytes, ext: str) -> tuple[bytes, bytes] | None:
+    """Find sourceMappingURL in file content.
+
+    Returns (full_match, url) or None if not found.
+    """
+    if ext in {".js", ".mjs", ".cjs"}:
+        match = _SOURCEMAP_JS_RE.search(content)
+    elif ext == ".css":
+        match = _SOURCEMAP_CSS_RE.search(content)
+    else:
+        return None
+
+    if match:
+        return (match.group(0), match.group(1))
+    return None
+
+
+def _rewrite_sourcemap_url(
+    content: bytes, old_ref: bytes, new_url: str, ext: str
+) -> bytes:
+    """Replace sourceMappingURL with new hashed URL."""
+    if ext in {".js", ".mjs", ".cjs"}:
+        new_ref = f"//# sourceMappingURL={new_url}".encode()
+    else:  # CSS
+        new_ref = f"/*# sourceMappingURL={new_url} */".encode()
+    return content.replace(old_ref, new_ref, 1)
+
 
 def _compress_file(data: bytes, encoding: str) -> bytes:
     """Compress data with the given encoding at max level."""
@@ -188,11 +224,170 @@ def _select_encoding(
     return supported[0][0]
 
 
+def _rewrite_sourcemap_references(
+    directory: Path,
+    encodings: tuple[str, ...],
+    compressible_extensions: frozenset[str],
+    outdir: Path | None,
+    path_to_url: dict[str, str],
+    hash_to_entry: dict[str, FileEntry],
+    path_to_entry: dict[str, FileEntry],
+) -> None:
+    """Rewrite sourceMappingURL in JS/CSS files to point to hashed source maps.
+
+    This is the second pass of file processing. It modifies entries in-place
+    when a JS/CSS file references a source map that exists in our entries.
+
+    Args:
+        directory: Source directory containing static files
+        encodings: Compression encodings to use
+        compressible_extensions: File extensions to compress
+        outdir: Optional output directory for CAS files
+        path_to_url: Mapping from relative paths to URLs (modified in-place)
+        hash_to_entry: Mapping from content hashes to entries (modified in-place)
+        path_to_entry: Mapping from relative paths to entries (modified in-place)
+    """
+    for rel_path_str, entry in list(path_to_entry.items()):
+        rel_path = Path(rel_path_str)
+        ext = rel_path.suffix.lower()
+
+        if ext not in _SOURCEMAP_EXTENSIONS:
+            continue
+
+        # Read content from identity variant
+        identity_variant = entry.variants["identity"]
+        content = Path(identity_variant.path_str).read_bytes()
+
+        # Find sourceMappingURL reference
+        sourcemap_ref = _find_sourcemap_reference(content, ext)
+        if sourcemap_ref is None:
+            continue
+
+        full_match, map_url = sourcemap_ref
+
+        # Resolve the relative map path
+        # map_url is bytes like b"app.js.map" or b"../maps/app.js.map"
+        map_url_str = map_url.decode("utf-8", errors="replace")
+
+        # Handle relative paths - resolve relative to the JS/CSS file's directory
+        file_dir = rel_path.parent
+        if file_dir == Path("."):
+            map_rel_path = map_url_str
+        else:
+            map_rel_path = str((file_dir / map_url_str).as_posix())
+
+        # Normalize the path (handle ../ etc)
+        try:
+            map_rel_path = str(Path(map_rel_path).as_posix())
+        except ValueError:
+            continue  # Invalid path
+
+        # Check if source map exists in our entries
+        map_entry = path_to_entry.get(map_rel_path)
+        if map_entry is None:
+            continue  # Source map not found, leave URL unchanged
+
+        # Get the hashed filename for the source map (just the basename)
+        # map_entry.url is like "/css/app.abc12345.js.map"
+        map_hashed_basename = Path(map_entry.url).name
+
+        # Rewrite content with new URL
+        new_content = _rewrite_sourcemap_url(
+            content, full_match, map_hashed_basename, ext
+        )
+
+        # Rehash the modified content
+        new_hash = hashlib.sha256(new_content).hexdigest()[:8]
+
+        # Skip if hash didn't change (shouldn't happen, but safety check)
+        if new_hash == entry.content_hash:
+            continue
+
+        # Remove old entry from hash_to_entry
+        del hash_to_entry[entry.content_hash]
+
+        # Compute new URL and paths
+        path_stem = entry.path_stem
+        new_hashed_filename = f"{path_stem}.{new_hash}{ext}"
+        new_url = f"/{new_hashed_filename}"
+
+        # Determine output paths and write new content
+        if outdir is not None:
+            new_identity_path = outdir / new_hashed_filename
+            new_identity_path.parent.mkdir(parents=True, exist_ok=True)
+            # Remove old identity file if different
+            old_identity_path = Path(identity_variant.path_str)
+            if old_identity_path != new_identity_path and old_identity_path.exists():
+                old_identity_path.unlink()
+            new_identity_path.write_bytes(new_content)
+            new_variants: dict[str, FileVariant] = {
+                "identity": FileVariant(
+                    path_str=str(new_identity_path),
+                    encoding="identity",
+                    size=len(new_content),
+                )
+            }
+        else:
+            # For in-place mode, update the original file
+            file_path = directory / rel_path_str
+            file_path.write_bytes(new_content)
+            new_variants = {
+                "identity": FileVariant(
+                    path_str=str(file_path),
+                    encoding="identity",
+                    size=len(new_content),
+                )
+            }
+
+        # Remove old compressed variants
+        for variant in entry.variants.values():
+            if variant.encoding != "identity":
+                old_compressed = Path(variant.path_str)
+                if old_compressed.exists():
+                    old_compressed.unlink()
+
+        # Re-compress the modified content
+        if ext.lower() in compressible_extensions:
+            for encoding in encodings:
+                suffix = _ENCODING_SUFFIXES[encoding]
+
+                if outdir is not None:
+                    compressed_path = outdir / f"{new_hashed_filename}{suffix}"
+                else:
+                    file_path = directory / rel_path_str
+                    compressed_path = file_path.with_suffix(ext + suffix)
+
+                compressed = _compress_file(new_content, encoding)
+                if len(compressed) < len(new_content):
+                    compressed_path.write_bytes(compressed)
+                    new_variants[encoding] = FileVariant(
+                        path_str=str(compressed_path),
+                        encoding=encoding,
+                        size=len(compressed),
+                    )
+
+        # Create new entry
+        new_entry = FileEntry(
+            content_type=entry.content_type,
+            content_hash=new_hash,
+            variants=new_variants,
+            url=new_url,
+            path_stem=path_stem,
+        )
+
+        # Update all mappings
+        path_to_url[rel_path_str] = new_url
+        hash_to_entry[new_hash] = new_entry
+        path_to_entry[rel_path_str] = new_entry
+
+
 def _build_file_entries(
     directory: Path,
     encodings: tuple[str, ...],
     compressible_extensions: frozenset[str],
     outdir: Path | None = None,
+    *,
+    rewrite_sourcemaps: bool = True,
 ) -> tuple[dict[str, str], dict[str, FileEntry], dict[str, FileEntry], _BuildStats]:
     """Walk directory and build file entries with compressed variants.
 
@@ -202,6 +397,8 @@ def _build_file_entries(
         compressible_extensions: File extensions to compress
         outdir: Optional output directory for CAS files. If None, files are
             written alongside originals in the source directory.
+        rewrite_sourcemaps: If True, rewrite sourceMappingURL in JS/CSS files
+            to point to hashed source map files.
 
     Returns:
         (path_to_url, hash_to_entry, path_to_entry, stats) tuple
@@ -338,6 +535,17 @@ def _build_file_entries(
             hash_to_entry[content_hash] = entry
             path_to_entry[rel_path_str] = entry
 
+    if rewrite_sourcemaps:
+        _rewrite_sourcemap_references(
+            directory,
+            encodings,
+            compressible_extensions,
+            outdir,
+            path_to_url,
+            hash_to_entry,
+            path_to_entry,
+        )
+
     return path_to_url, hash_to_entry, path_to_entry, stats
 
 
@@ -347,6 +555,7 @@ def prepare(
     outdir: Path | None = None,
     encodings: Iterable[Encoding] = ("zstd", "br", "gzip"),
     compressible_extensions: Iterable[str] = DEFAULT_COMPRESSIBLE_EXTENSIONS,
+    rewrite_sourcemaps: bool = True,
 ) -> dict[str, str]:
     """Pre-compress static files and return path-to-URL mapping.
 
@@ -362,6 +571,8 @@ def prepare(
             Default: ("zstd", "br", "gzip")
         compressible_extensions: File extensions to compress.
             Default: DEFAULT_COMPRESSIBLE_EXTENSIONS
+        rewrite_sourcemaps: If True (default), rewrite sourceMappingURL in
+            JS/CSS files to point to hashed source map files.
 
     Returns:
         Mapping of relative file paths to their hashed URLs.
@@ -385,7 +596,11 @@ def prepare(
 
     start_time = time.perf_counter()
     path_to_url, _, _, stats = _build_file_entries(
-        directory, encodings_tuple, compressible_set, outdir
+        directory,
+        encodings_tuple,
+        compressible_set,
+        outdir,
+        rewrite_sourcemaps=rewrite_sourcemaps,
     )
     elapsed_ms = (time.perf_counter() - start_time) * 1000
 
@@ -448,6 +663,7 @@ def static_files(
     encodings: Iterable[Encoding] = ("zstd", "br", "gzip"),
     compressible_extensions: Iterable[str] = DEFAULT_COMPRESSIBLE_EXTENSIONS,
     canonical_redirect: bool = True,
+    rewrite_sourcemaps: bool = True,
 ) -> tuple[RSGIHTTPHandler, UrlPathFn]:
     """Create a compressed static files app using content-addressable storage.
 
@@ -474,6 +690,8 @@ def static_files(
             their canonical hashed URLs. When False, non-hashed paths are served
             directly with no-cache headers. Set to False for source maps or
             other files where clients don't follow redirects.
+        rewrite_sourcemaps: If True (default), rewrite sourceMappingURL in
+            JS/CSS files to point to hashed source map files.
 
     Returns:
         (app, url_path) tuple where:
@@ -515,7 +733,11 @@ def static_files(
     # Pre-compress files and build mappings at startup
     start_time = time.perf_counter()
     path_to_url, hash_to_entry, path_to_entry, stats = _build_file_entries(
-        directory, encodings_tuple, compressible_set, outdir
+        directory,
+        encodings_tuple,
+        compressible_set,
+        outdir,
+        rewrite_sourcemaps=rewrite_sourcemaps,
     )
     elapsed_ms = (time.perf_counter() - start_time) * 1000
 
