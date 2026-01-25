@@ -3,6 +3,9 @@
 Files are pre-compressed at startup and served via hash-based URLs for optimal caching.
 
 Install with: uv add "muxy[compress]"
+
+This should be refactored once Granian's static files supports serving compressed
+sidecar files (https://github.com/emmett-framework/granian/issues/577).
 """
 
 from __future__ import annotations
