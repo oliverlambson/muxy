@@ -50,7 +50,6 @@ async def main() -> None:
     router.get("/", home)
     router.mount("/user", user_router(_db))
     router.mount("/product", product_router(_db))
-    router.finalize()
 
     server = Server(router, address=ADDRESS, port=PORT, log_access=True)
     try:

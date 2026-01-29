@@ -77,7 +77,6 @@ async def main() -> None:
     router.method_not_allowed(method_not_allowed)
     router.get("/", home)
     router.mount("/user", user_router(db))
-    router.finalize()
 
     server = Server(router)
     try:

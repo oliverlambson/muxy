@@ -86,7 +86,6 @@ router.not_found(not_found)
 router.method_not_allowed(not_allowed)
 router.get("/", hello)
 router.get("/stream", stream)
-router.finalize()
 
 
 async def main() -> None:

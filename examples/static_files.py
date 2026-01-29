@@ -75,7 +75,6 @@ async def main() -> None:
         router.method_not_allowed(method_not_allowed)
         router.get("/static/{path...}", static_app)
         router.get("/", home(url_path))
-        router.finalize()
 
         # Run server and make requests
         task = asyncio.create_task(serve(router))
