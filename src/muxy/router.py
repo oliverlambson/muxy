@@ -3,6 +3,7 @@
 Inspired by go-chi/mux's Mux
 """
 
+from asyncio import AbstractEventLoop
 from collections.abc import Callable
 from functools import reduce
 from typing import Literal, overload
@@ -36,8 +37,9 @@ type WebsocketMethod = Literal["WEBSOCKET"]
 
 
 class Router:
-    __slots__ = ("_tree",)
+    __slots__ = ("_finalized", "_tree")
     _tree: Node[RSGIHandler]
+    _finalized: bool
 
     def __init__(
         self,
@@ -49,6 +51,7 @@ class Router:
             not_found_handler=not_found_handler,
             method_not_allowed_handler=method_not_allowed_handler,
         )
+        self._finalized = False
 
     @overload
     async def __rsgi__(self, scope: HTTPScope, proto: HTTPProtocol) -> None: ...
@@ -252,16 +255,22 @@ class Router:
 
     def mount(self, path: str, router: Router) -> None:
         """Merges in another router at path."""
-        if path.endswith("/"):
+        if path.endswith("/") and path != "/":
             msg = "mount path cannot end in /"
             raise ValueError(msg)
         self._tree = mount_tree(path, self._tree, router._tree)
 
     def finalize(self) -> None:
+        """Finalize the router tree.
+
+        Cascades not_found_handler, method_not_allowed_handler, and middleware
+        down through the routing tree. Idempotent - safe to call multiple times.
+
+        This is called automatically by __rsgi_init__ at server startup, but can
+        be called manually before forking workers to avoid re-finalization overhead.
         """
-        Cascades not_found_handler, method_not_allowed_handler, and middleware down
-        through the routing tree.
-        """
+        if self._finalized:
+            return
         if self._tree.not_found_handler is None:
             msg = "Router does not have not_found_handler"
             raise ValueError(msg)
@@ -274,3 +283,8 @@ class Router:
             self._tree.method_not_allowed_handler,
             (),
         )
+        self._finalized = True
+
+    def __rsgi_init__(self, loop: AbstractEventLoop) -> None:
+        """Called by RSGI server at startup. Finalizes the router tree."""
+        self.finalize()

@@ -186,8 +186,53 @@ def add_route[T](
 
 
 def mount_tree[T](path: str, parent: Node[T], child: Node[T]) -> Node[T]:
+    # Pre-cascade child's middleware so it stays with child routes after merge
+    if child.middleware:
+        child = _cascade_middleware(child, ())
+    if path == "/":
+        return _merge_trees(parent, child)  # root mount: merge trees directly
     sub_tree = _construct_sub_tree(path, child)
     return _merge_trees(parent, sub_tree)
+
+
+def _cascade_middleware[T](
+    tree: Node[T], middleware: tuple[Middleware[T], ...]
+) -> Node[T]:
+    """Cascade middleware down through tree, only setting on leaf nodes (with handlers)."""
+    if tree.middleware:
+        middleware = middleware + tree.middleware
+
+    if tree.handler is not None:
+        tree = tree.update(middleware=middleware)
+    else:
+        tree = tree.update(middleware=())
+
+    if tree.wildcard is not None:
+        tree = tree.update(
+            wildcard=WildCardNode(
+                name=tree.wildcard.name,
+                child=_cascade_middleware(tree.wildcard.child, middleware),
+            )
+        )
+
+    if tree.catchall is not None:
+        tree = tree.update(
+            catchall=CatchAllNode(
+                name=tree.catchall.name,
+                child=_cascade_middleware(tree.catchall.child, middleware),
+            )
+        )
+
+    tree = tree.update(
+        children=FrozenDict(
+            {
+                k: _cascade_middleware(child, middleware)
+                for k, child in tree.children.items()
+            }
+        )
+    )
+
+    return tree
 
 
 def finalize_tree[T](

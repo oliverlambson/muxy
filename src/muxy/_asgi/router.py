@@ -24,6 +24,12 @@ from .types import (
     HTTPReceive,
     HTTPScope,
     HTTPSend,
+    LifespanReceive,
+    LifespanScope,
+    LifespanSend,
+    LifespanShutdownCompleteEvent,
+    LifespanStartupCompleteEvent,
+    LifespanStartupFailedEvent,
     WebsocketReceive,
     WebsocketScope,
     WebsocketSend,
@@ -38,8 +44,9 @@ type WebsocketMethod = Literal["WEBSOCKET"]
 
 
 class Router:
-    __slots__ = ("_tree",)
+    __slots__ = ("_finalized", "_tree")
     _tree: Node[ASGIHandler]
+    _finalized: bool
 
     def __init__(
         self,
@@ -51,6 +58,7 @@ class Router:
             not_found_handler=not_found_handler,
             method_not_allowed_handler=method_not_allowed_handler,
         )
+        self._finalized = False
 
     @overload
     async def __call__(
@@ -60,14 +68,18 @@ class Router:
     async def __call__(
         self, scope: WebsocketScope, receive: WebsocketReceive, send: WebsocketSend
     ) -> None: ...
+    @overload
+    async def __call__(
+        self, scope: LifespanScope, receive: LifespanReceive, send: LifespanSend
+    ) -> None: ...
     async def __call__(
         self,
-        scope: HTTPScope | WebsocketScope,
-        receive: HTTPReceive | WebsocketReceive,
-        send: HTTPSend | WebsocketSend,
+        scope: HTTPScope | WebsocketScope | LifespanScope,
+        receive: HTTPReceive | WebsocketReceive | LifespanReceive,
+        send: HTTPSend | WebsocketSend | LifespanSend,
     ) -> None:
         if scope["type"] == "lifespan":
-            pass  # TODO: implement lifespan handler
+            await self._handle_lifespan(receive, send)  # ty: ignore[invalid-argument-type]
         else:
             handler, params = self._handler(
                 LeafKey(scope["method"].upper())
@@ -77,6 +89,56 @@ class Router:
             )
             with path_params.set(params):
                 await handler(scope, receive, send)  # ty: ignore[invalid-argument-type]  - is correct just want to avoid casting
+
+    async def _handle_lifespan(
+        self, receive: LifespanReceive, send: LifespanSend
+    ) -> None:
+        """Handle ASGI lifespan events."""
+        while True:
+            message = await receive()
+            if message["type"] == "lifespan.startup":
+                try:
+                    self.finalize()
+                    await send(
+                        LifespanStartupCompleteEvent(type="lifespan.startup.complete")
+                    )
+                except Exception as e:  # noqa: BLE001  - ASGI requires reporting any failure
+                    await send(
+                        LifespanStartupFailedEvent(
+                            type="lifespan.startup.failed", message=str(e)
+                        )
+                    )
+                    return
+            elif message["type"] == "lifespan.shutdown":
+                await send(
+                    LifespanShutdownCompleteEvent(type="lifespan.shutdown.complete")
+                )
+                return
+
+    def finalize(self) -> None:
+        """Finalize the router tree.
+
+        Cascades not_found_handler, method_not_allowed_handler, and middleware
+        down through the routing tree. Idempotent - safe to call multiple times.
+
+        This is called automatically during ASGI lifespan startup, but can be
+        called manually before forking workers to avoid re-finalization overhead.
+        """
+        if self._finalized:
+            return
+        if self._tree.not_found_handler is None:
+            msg = "Router does not have not_found_handler"
+            raise ValueError(msg)
+        if self._tree.method_not_allowed_handler is None:
+            msg = "Router does not have method_not_allowed_handler"
+            raise ValueError(msg)
+        self._tree = finalize_tree(
+            self._tree,
+            self._tree.not_found_handler,
+            self._tree.method_not_allowed_handler,
+            (),
+        )
+        self._finalized = True
 
     @overload
     def _handler(
@@ -262,25 +324,7 @@ class Router:
 
     def mount(self, path: str, router: Router) -> None:
         """Merges in another router at path."""
-        if path.endswith("/"):
+        if path.endswith("/") and path != "/":
             msg = "mount path cannot end in /"
             raise ValueError(msg)
         self._tree = mount_tree(path, self._tree, router._tree)
-
-    def finalize(self) -> None:
-        """
-        Cascades not_found_handler, method_not_allowed_handler, and middleware down
-        through the routing tree.
-        """
-        if self._tree.not_found_handler is None:
-            msg = "Router does not have not_found_handler"
-            raise ValueError(msg)
-        if self._tree.method_not_allowed_handler is None:
-            msg = "Router does not have method_not_allowed_handler"
-            raise ValueError(msg)
-        self._tree = finalize_tree(
-            self._tree,
-            self._tree.not_found_handler,
-            self._tree.method_not_allowed_handler,
-            (),
-        )

@@ -40,8 +40,8 @@ async def test_router_http_methods(method_name: str, http_method: str) -> None:
 
     router = Router()
     getattr(router, method_name)("/test", handler)
-    router.not_found(not_found)  # just to allow finalize()
-    router.method_not_allowed(method_not_allowed)  # just to allow finalize()
+    router.not_found(not_found)  # required for router init
+    router.method_not_allowed(method_not_allowed)  # required for router init
     router.finalize()
 
     await router.__rsgi__(mock_scope("/test", http_method), mock_proto)
@@ -472,6 +472,122 @@ async def test_mount_preserves_handlers() -> None:
     called.clear()
     await parent.__rsgi__(mock_scope("/api/users", "GET"), mock_proto)
     assert called == ["child"]
+
+
+@pytest.mark.asyncio
+async def test_mount_at_root() -> None:
+    """Test mounting a child router at root path '/'."""
+    called: list[str] = []
+
+    async def child_handler(s: HTTPScope, p: HTTPProtocol) -> None:
+        called.append("child")
+
+    async def not_found(s: HTTPScope, p: HTTPProtocol) -> None:
+        called.append("404")
+
+    async def method_not_allowed(s: HTTPScope, p: HTTPProtocol) -> None:
+        called.append("405")
+
+    child = Router()
+    child.get("/users", child_handler)
+
+    parent = Router()
+    parent.mount("/", child)
+    parent.not_found(not_found)
+    parent.method_not_allowed(method_not_allowed)
+    parent.finalize()
+
+    await parent.__rsgi__(mock_scope("/users", "GET"), mock_proto)
+    assert called == ["child"]
+
+
+@pytest.mark.asyncio
+async def test_mount_at_root_multiple_with_middleware() -> None:
+    """Test mounting multiple child routers at root with different middleware."""
+    called: list[str] = []
+
+    async def handler_a(s: HTTPScope, p: HTTPProtocol) -> None:
+        called.append("handler_a")
+
+    async def handler_b(s: HTTPScope, p: HTTPProtocol) -> None:
+        called.append("handler_b")
+
+    async def not_found(s: HTTPScope, p: HTTPProtocol) -> None:
+        called.append("404")
+
+    async def method_not_allowed(s: HTTPScope, p: HTTPProtocol) -> None:
+        called.append("405")
+
+    def make_middleware(name: str) -> Callable[[RSGIHandler], RSGIHandler]:
+        def middleware(f: RSGIHandler) -> RSGIHandler:
+            called.append(f"mw_{name}")
+            return f
+
+        return middleware
+
+    child1 = Router()
+    child1.use(make_middleware("a"))
+    child1.get("/a", handler_a)
+
+    child2 = Router()
+    child2.use(make_middleware("b"))
+    child2.get("/b", handler_b)
+
+    parent = Router()
+    parent.mount("/", child1)
+    parent.mount("/", child2)
+    parent.not_found(not_found)
+    parent.method_not_allowed(method_not_allowed)
+    parent.finalize()
+
+    # /a should only have child1's middleware
+    await parent.__rsgi__(mock_scope("/a", "GET"), mock_proto)
+    assert called == ["mw_a", "handler_a"]
+
+    # /b should only have child2's middleware
+    called.clear()
+    await parent.__rsgi__(mock_scope("/b", "GET"), mock_proto)
+    assert called == ["mw_b", "handler_b"]
+
+
+@pytest.mark.asyncio
+async def test_mount_at_root_with_parent_middleware() -> None:
+    """Test that parent middleware is applied before child middleware when mounting at root."""
+    called: list[str] = []
+
+    async def handler(s: HTTPScope, p: HTTPProtocol) -> None:
+        called.append("handler")
+
+    async def not_found(s: HTTPScope, p: HTTPProtocol) -> None:
+        called.append("404")
+
+    async def method_not_allowed(s: HTTPScope, p: HTTPProtocol) -> None:
+        called.append("405")
+
+    def make_middleware(name: str) -> Callable[[RSGIHandler], RSGIHandler]:
+        def middleware(f: RSGIHandler) -> RSGIHandler:
+            async def wrapped(s: HTTPScope, p: HTTPProtocol) -> None:
+                called.append(f"mw_{name}")
+                await f(s, p)  # ty: ignore[invalid-argument-type]
+
+            return wrapped
+
+        return middleware
+
+    child = Router()
+    child.use(make_middleware("child"))
+    child.get("/users", handler)
+
+    parent = Router()
+    parent.use(make_middleware("parent"))
+    parent.mount("/", child)
+    parent.not_found(not_found)
+    parent.method_not_allowed(method_not_allowed)
+    parent.finalize()
+
+    # Parent middleware should be applied first, then child middleware
+    await parent.__rsgi__(mock_scope("/users", "GET"), mock_proto)
+    assert called == ["mw_parent", "mw_child", "handler"]
 
 
 # --- Edge case tests ----------------------------------------------------------
