@@ -11,7 +11,7 @@
 # ///
 """RSGI compression middleware demo.
 
-Shows useage of compression middleware on an RSGI app, demos simple & streaming
+Shows usage of compression middleware on an RSGI app, demos simple & SSE streaming
 response.
 """
 
@@ -42,20 +42,11 @@ async def hello(scope: HTTPScope, proto: HTTPProtocol) -> None:
 
 
 async def stream(scope: HTTPScope, proto: HTTPProtocol) -> None:
-    transport = proto.response_stream(200, [("content-type", "text/plain")])
+    transport = proto.response_stream(200, [("content-type", "text/event-stream")])
 
-    rate = 1 / 30  # 30 fps
-    i = 1
-    abs_incr = 1
-    incr = abs_incr
-    while True:
-        if i <= 1:
-            incr = abs_incr
-        elif i >= 15:
-            incr = -abs_incr
-
+    for i in range(1, 11):
         try:
-            await transport.send_str("#" * (6 * i) + "\n")
+            await transport.send_str(f"data: message {i}\n\n")
         except ProtocolClosed:
             print("client disconnected", flush=True, file=sys.stderr)
             break
@@ -63,10 +54,8 @@ async def stream(scope: HTTPScope, proto: HTTPProtocol) -> None:
             print("handler cancelled", flush=True, file=sys.stderr)
             break
 
-        i += incr
-
         try:
-            await asyncio.sleep(rate)
+            await asyncio.sleep(0.1)
         except asyncio.CancelledError:
             print("handler cancelled", flush=True, file=sys.stderr)
             break
@@ -117,16 +106,12 @@ async def requests() -> None:
         print("response compression:", encoding)
         print(response.text, flush=True, file=sys.stderr)
 
-        print("--- Streaming response ---")
-        try:
-            async with asyncio.timeout(1):
-                async with client.stream("GET", "/stream") as response:
-                    encoding = response.headers.get("content-encoding")
-                    print("response compression:", encoding)
-                    async for chunk in response.aiter_text():
-                        print(chunk, end="", flush=True, file=sys.stderr)
-        except TimeoutError:
-            pass
+        print("--- SSE streaming response ---")
+        async with client.stream("GET", "/stream") as response:
+            encoding = response.headers.get("content-encoding")
+            print("response compression:", encoding)
+            async for chunk in response.aiter_text():
+                print(chunk, end="", flush=True, file=sys.stderr)
 
 
 if __name__ == "__main__":

@@ -106,6 +106,7 @@ DEFAULT_COMPRESSIBLE_TYPES: frozenset[str] = frozenset(
         "text/plain",
         "text/javascript",
         "text/xml",
+        "text/event-stream",
         "application/json",
         "application/javascript",
         "application/xml",
@@ -408,8 +409,20 @@ class _CompressingHTTPProtocol:
 
     def response_stream(
         self, status: int, headers: list[tuple[str, str]]
-    ) -> _CompressingHTTPStreamTransport:
-        """Start a compressed stream response."""
+    ) -> _CompressingHTTPStreamTransport | HTTPStreamTransport:
+        """Start a stream response, compressing if content-type is compressible."""
+        # Check content-type and existing content-encoding (mirrors _should_compress
+        # but without body_size/min_size which are unknown for streams)
+        content_type: str | None = None
+        for name, value in headers:
+            if name == "content-encoding":
+                return self._proto.response_stream(status, headers)
+            if name == "content-type":
+                content_type = value.split(";", 1)[0].strip().lower()
+
+        if content_type is None or content_type not in self._compressible_types:
+            return self._proto.response_stream(status, headers)
+
         # Build new headers, filtering out content-length/encoding and adding ours
         new_headers = [
             (name, value)

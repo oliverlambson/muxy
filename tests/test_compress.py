@@ -482,6 +482,7 @@ def test_default_compressible_types() -> None:
     assert "text/javascript" in DEFAULT_COMPRESSIBLE_TYPES
     assert "application/javascript" in DEFAULT_COMPRESSIBLE_TYPES
     assert "image/svg+xml" in DEFAULT_COMPRESSIBLE_TYPES
+    assert "text/event-stream" in DEFAULT_COMPRESSIBLE_TYPES
 
 
 def test_default_min_size() -> None:
@@ -616,3 +617,54 @@ async def test_stream_no_compression_without_encoding() -> None:
     assert proto.stream_transport is not None
     data = proto.stream_transport.get_data()
     assert data == b"helloworld"
+
+
+@pytest.mark.asyncio
+async def test_stream_no_compression_for_non_compressible_type() -> None:
+    """Test streaming with non-compressible content-type passes through uncompressed."""
+
+    async def handler(scope: HTTPScope, proto: HTTPProtocol) -> None:
+        stream = proto.response_stream(200, [("content-type", "image/png")])
+        await stream.send_bytes(b"fake png data")
+
+    middleware = compress()
+    wrapped = cast(RSGIHTTPHandler, middleware(handler))
+
+    proto = MockHTTPProtocol()
+    scope = mock_scope(headers={"accept-encoding": "gzip"})
+    await wrapped(scope, proto)
+
+    # Should pass through uncompressed
+    headers_dict = dict(proto.response_headers or [])
+    assert "content-encoding" not in headers_dict
+
+    assert proto.stream_transport is not None
+    data = proto.stream_transport.get_data()
+    assert data == b"fake png data"
+
+
+@pytest.mark.asyncio
+async def test_stream_no_compression_with_existing_content_encoding() -> None:
+    """Test streaming with existing content-encoding passes through uncompressed."""
+
+    async def handler(scope: HTTPScope, proto: HTTPProtocol) -> None:
+        stream = proto.response_stream(
+            200,
+            [("content-type", "application/json"), ("content-encoding", "br")],
+        )
+        await stream.send_bytes(b"already compressed")
+
+    middleware = compress()
+    wrapped = cast(RSGIHTTPHandler, middleware(handler))
+
+    proto = MockHTTPProtocol()
+    scope = mock_scope(headers={"accept-encoding": "gzip"})
+    await wrapped(scope, proto)
+
+    # Should pass through without adding another content-encoding
+    headers_dict = dict(proto.response_headers or [])
+    assert headers_dict.get("content-encoding") == "br"
+
+    assert proto.stream_transport is not None
+    data = proto.stream_transport.get_data()
+    assert data == b"already compressed"
