@@ -14,6 +14,7 @@ from muxy.tree import (
     add_route,
     finalize_tree,
     find_handler,
+    format_routes,
     mount_tree,
 )
 
@@ -271,21 +272,57 @@ middleware:
 /admin/user                     admin_user_middleware
 POST /admin/user/{id}/rename    admin_user_rename_middleware
 """
+
+
 # handlers
-admin_home_handler = lambda: "admin_home"  # noqa: E731
-admin_user_rename_handler = lambda: "admin_user_rename"  # noqa: E731
-admin_user_transaction_view_handler = lambda: "admin_user_transaction_view"  # noqa: E731
-static_handler = lambda: "static"  # noqa: E731
-home_handler = lambda: "home"  # noqa: E731
-not_found_handler = lambda: "not_found"  # noqa: E731
-admin_not_found_handler = lambda: "admin_not_found"  # noqa: E731
-method_not_allowed_handler = lambda: "method_not_allowed"  # noqa: E731
-static_method_not_allowed_handler = lambda: "static_method_not_allowed"  # noqa: E731
+def admin_home_handler():
+    return "admin_home"
+
+
+def admin_user_rename_handler():
+    return "admin_user_rename"
+
+
+def admin_user_transaction_view_handler():
+    return "admin_user_transaction_view"
+
+
+def static_handler():
+    return "static"
+
+
+def home_handler():
+    return "home"
+
+
+def not_found_handler():
+    return "not_found"
+
+
+def admin_not_found_handler():
+    return "admin_not_found"
+
+
+def method_not_allowed_handler():
+    return "method_not_allowed"
+
+
+def static_method_not_allowed_handler():
+    return "static_method_not_allowed"
+
 
 # middleware
-admin_middleware = lambda s: s + ".admin_middleware"  # noqa: E731
-admin_user_middleware = lambda s: s + ".admin_user_middleware"  # noqa: E731
-admin_user_rename_middleware = lambda s: s + ".admin_user_rename_middleware"  # noqa: E731
+def admin_middleware(s):
+    return s + ".admin_middleware"
+
+
+def admin_user_middleware(s):
+    return s + ".admin_user_middleware"
+
+
+def admin_user_rename_middleware(s):
+    return s + ".admin_user_rename_middleware"
+
 
 unfinalized_tree = Node(
     children=FrozenDict(
@@ -570,3 +607,78 @@ def test_find_handler(
     assert handler is expected_handler
     assert middleware == expected_middleware
     assert params == expected_params
+
+
+def test_format_routes() -> None:
+    expected = "\n".join(
+        [
+            "*      /                                   home_handler",
+            "GET    /admin                              admin_home_handler                    [admin_middleware]",
+            "POST   /admin/user/{id}/rename             admin_user_rename_handler             [admin_middleware > admin_user_middleware > admin_user_rename_middleware]",
+            "GET    /admin/user/{id}/transaction/{tx}   admin_user_transaction_view_handler   [admin_middleware > admin_user_middleware]",
+            "GET    /static/{path...}                   static_handler",
+        ]
+    )
+    assert format_routes(finalized_tree) == expected
+
+
+def test_format_routes_verbose() -> None:
+    expected = "\n".join(
+        [
+            "*      /                                   home_handler",
+            "GET    /admin                              admin_home_handler                    [admin_middleware]",
+            "POST   /admin/user/{id}/rename             admin_user_rename_handler             [admin_middleware > admin_user_middleware > admin_user_rename_middleware]",
+            "GET    /admin/user/{id}/transaction/{tx}   admin_user_transaction_view_handler   [admin_middleware > admin_user_middleware]",
+            "GET    /static/{path...}                   static_handler",
+            "",
+            "404   /         not_found_handler",
+            "405   /         method_not_allowed_handler",
+            "404   /admin    admin_not_found_handler",
+            "405   /static   static_method_not_allowed_handler",
+        ]
+    )
+    assert format_routes(finalized_tree, verbose=True) == expected
+
+
+def test_format_tree() -> None:
+    expected = "\n".join(
+        [
+            "/",
+            "├── [*] home_handler",
+            "├── admin",
+            "│   ├── [GET] admin_home_handler [admin_middleware]",
+            "│   └── user",
+            "│       └── {id}",
+            "│           ├── rename",
+            "│           │   └── [POST] admin_user_rename_handler [admin_middleware > admin_user_middleware > admin_user_rename_middleware]",
+            "│           └── transaction",
+            "│               └── {tx}",
+            "│                   └── [GET] admin_user_transaction_view_handler [admin_middleware > admin_user_middleware]",
+            "└── static",
+            "    └── {path...}",
+            "        └── [GET] static_handler",
+        ]
+    )
+    assert format_routes(finalized_tree, tree=True) == expected
+
+
+def test_format_tree_verbose() -> None:
+    expected = "\n".join(
+        [
+            "/ (404: not_found_handler, 405: method_not_allowed_handler)",
+            "├── [*] home_handler",
+            "├── admin (404: admin_not_found_handler)",
+            "│   ├── [GET] admin_home_handler [admin_middleware]",
+            "│   └── user",
+            "│       └── {id}",
+            "│           ├── rename",
+            "│           │   └── [POST] admin_user_rename_handler [admin_middleware > admin_user_middleware > admin_user_rename_middleware]",
+            "│           └── transaction",
+            "│               └── {tx}",
+            "│                   └── [GET] admin_user_transaction_view_handler [admin_middleware > admin_user_middleware]",
+            "└── static (405: static_method_not_allowed_handler)",
+            "    └── {path...}",
+            "        └── [GET] static_handler",
+        ]
+    )
+    assert format_routes(finalized_tree, verbose=True, tree=True) == expected

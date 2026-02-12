@@ -353,6 +353,247 @@ def _construct_sub_tree[T](path: str, child: Node[T]) -> Node[T]:
     return child
 
 
+def format_routes[T](
+    root: Node[T], *, verbose: bool = False, tree: bool = False
+) -> str:
+    """Format registered routes from a finalized tree as a human-readable string.
+
+    By default produces a column-aligned flat route list:
+
+        *      /                                   home_handler
+        GET    /admin                              admin_home_handler                    [admin_middleware]
+        POST   /admin/user/{id}/rename             admin_user_rename_handler             [admin_middleware > admin_user_middleware > admin_user_rename_middleware]
+        GET    /admin/user/{id}/transaction/{tx}   admin_user_transaction_view_handler   [admin_middleware > admin_user_middleware]
+        GET    /static/{path...}                   static_handler
+
+    With `tree=True`, produces a visual tree instead:
+
+        /
+        ├── [*] home_handler
+        ├── admin
+        │   ├── [GET] admin_home_handler [admin_middleware]
+        │   └── user
+        │       └── {id}
+        │           ├── rename
+        │           │   └── [POST] admin_user_rename_handler [admin_middleware > admin_user_middleware > admin_user_rename_middleware]
+        │           └── transaction
+        │               └── {tx}
+        │                   └── [GET] admin_user_transaction_view_handler [admin_middleware > admin_user_middleware]
+        └── static
+            └── {path...}
+                └── [GET] static_handler
+
+    With `verbose=True`, error handler overrides are included in both formats.
+    """
+    if tree:
+        return _format_tree(root, verbose=verbose)
+    return _format_route_list(root, verbose=verbose)
+
+
+type _Route = tuple[str, str, str, list[str]]
+type _ErrorOverride = tuple[str, str, str]
+
+
+def _format_route_list[T](root: Node[T], *, verbose: bool) -> str:
+    """Column-aligned flat route list."""
+    routes, errors = _collect_routes(
+        root,
+        [],
+        root.not_found_handler,
+        root.method_not_allowed_handler,
+    )
+    routes.sort(key=lambda r: (r[1], r[0]))
+    if not routes:
+        return ""
+
+    method_w = max(len(r[0]) for r in routes)
+    path_w = max(len(r[1]) for r in routes)
+    handler_w = max(len(r[2]) for r in routes)
+
+    lines: list[str] = []
+    for method, path, handler, mw in routes:
+        if mw:
+            lines.append(
+                f"{method:<{method_w}}   {path:<{path_w}}   "
+                f"{handler:<{handler_w}}   [{' > '.join(mw)}]"
+            )
+        else:
+            lines.append(f"{method:<{method_w}}   {path:<{path_w}}   {handler}")
+
+    if verbose:
+        root_errors: list[_ErrorOverride] = []
+        if root.not_found_handler is not None:
+            root_errors.append(("404", "/", _qualname(root.not_found_handler)))
+        if root.method_not_allowed_handler is not None:
+            root_errors.append(("405", "/", _qualname(root.method_not_allowed_handler)))
+        all_errors = root_errors + sorted(errors, key=lambda e: (e[1], e[0]))
+        if all_errors:
+            lines.append("")
+            status_w = max(len(e[0]) for e in all_errors)
+            err_path_w = max(len(e[1]) for e in all_errors)
+            for status, path, handler in all_errors:
+                lines.append(f"{status:<{status_w}}   {path:<{err_path_w}}   {handler}")
+
+    return "\n".join(lines)
+
+
+def _collect_routes[T](
+    node: Node[T],
+    parts: list[str],
+    parent_nfh: T | None,
+    parent_mah: T | None,
+) -> tuple[list[_Route], list[_ErrorOverride]]:
+    """Walk the trie, returning route entries and error handler transitions."""
+    routes: list[_Route] = []
+    errors: list[_ErrorOverride] = []
+
+    if node.not_found_handler is not parent_nfh:
+        errors.append(("404", "/" + "/".join(parts), _qualname(node.not_found_handler)))
+    if node.method_not_allowed_handler is not parent_mah:
+        errors.append(
+            ("405", "/" + "/".join(parts), _qualname(node.method_not_allowed_handler))
+        )
+
+    for key, child in node.children.items():
+        if isinstance(key, LeafKey):
+            if child.handler is not None:
+                method_str = "*" if key == LeafKey.ANY_HTTP else key.value
+                path = "/" + "/".join(parts)
+                mw = [_qualname(m) for m in child.middleware]
+                routes.append((method_str, path, _qualname(child.handler), mw))
+        else:
+            sub_routes, sub_errors = _collect_routes(
+                child,
+                [*parts, key],
+                node.not_found_handler,
+                node.method_not_allowed_handler,
+            )
+            routes.extend(sub_routes)
+            errors.extend(sub_errors)
+
+    if node.wildcard is not None:
+        sub_routes, sub_errors = _collect_routes(
+            node.wildcard.child,
+            [*parts, "{" + node.wildcard.name + "}"],
+            node.not_found_handler,
+            node.method_not_allowed_handler,
+        )
+        routes.extend(sub_routes)
+        errors.extend(sub_errors)
+
+    if node.catchall is not None:
+        sub_routes, sub_errors = _collect_routes(
+            node.catchall.child,
+            [*parts, "{" + node.catchall.name + "...}"],
+            node.not_found_handler,
+            node.method_not_allowed_handler,
+        )
+        routes.extend(sub_routes)
+        errors.extend(sub_errors)
+
+    return routes, errors
+
+
+def _format_tree[T](root: Node[T], *, verbose: bool) -> str:
+    """Visual tree with box-drawing characters."""
+    root_label = "/"
+    if verbose:
+        annotations: list[str] = []
+        if root.not_found_handler is not None:
+            annotations.append(f"404: {_qualname(root.not_found_handler)}")
+        if root.method_not_allowed_handler is not None:
+            annotations.append(f"405: {_qualname(root.method_not_allowed_handler)}")
+        if annotations:
+            root_label += " (" + ", ".join(annotations) + ")"
+    lines: list[str] = [root_label]
+    _render_tree(root, "", verbose=verbose, lines=lines)
+    return "\n".join(lines)
+
+
+def _render_tree[T](
+    node: Node[T], prefix: str, *, verbose: bool, lines: list[str]
+) -> None:
+    """Recursively render a node's children with tree-drawing prefixes."""
+    items: list[tuple[str, Node[T] | None]] = []
+
+    # Handler entries from "" child (root "/" path handlers)
+    empty_child = node.children.get("")
+    if empty_child is not None:
+        for key, leaf in _sorted_leaf_keys(empty_child.children):
+            if leaf.handler is not None:
+                items.append((_handler_label(key, leaf), None))
+
+    # Handler entries from own LeafKey children
+    for key, leaf in _sorted_leaf_keys(node.children):
+        if leaf.handler is not None:
+            items.append((_handler_label(key, leaf), None))
+
+    # Named segment children (sorted, excluding "")
+    for seg, child in sorted(
+        ((k, v) for k, v in node.children.items() if isinstance(k, str) and k != ""),
+        key=lambda x: x[0],
+    ):
+        annotation = _error_annotation(child, node) if verbose else ""
+        items.append((f"{seg}{annotation}", child))
+
+    # Wildcard
+    if node.wildcard is not None:
+        child = node.wildcard.child
+        annotation = _error_annotation(child, node) if verbose else ""
+        items.append((f"{{{node.wildcard.name}}}{annotation}", child))
+
+    # Catchall
+    if node.catchall is not None:
+        child = node.catchall.child
+        annotation = _error_annotation(child, node) if verbose else ""
+        items.append((f"{{{node.catchall.name}...}}{annotation}", child))
+
+    for i, (label, child) in enumerate(items):
+        is_last = i == len(items) - 1
+        connector = "└── " if is_last else "├── "
+        lines.append(f"{prefix}{connector}{label}")
+        if child is not None:
+            extension = "    " if is_last else "│   "
+            _render_tree(child, prefix + extension, verbose=verbose, lines=lines)
+
+
+def _qualname(obj: object) -> str:
+    """Extract __qualname__ from a callable, falling back to repr."""
+    return str(obj.__qualname__) if hasattr(obj, "__qualname__") else repr(obj)
+
+
+def _sorted_leaf_keys[T](
+    children: FrozenDict[str | LeafKey, Node[T]],
+) -> list[tuple[LeafKey, Node[T]]]:
+    """Filter and sort a node's children to LeafKey entries only."""
+    return sorted(
+        ((k, v) for k, v in children.items() if isinstance(k, LeafKey)),
+        key=lambda x: x[0].value,
+    )
+
+
+def _handler_label[T](key: LeafKey, leaf: Node[T]) -> str:
+    """Format a handler entry: [METHOD] name [middleware]."""
+    method = "*" if key == LeafKey.ANY_HTTP else key.value
+    label = f"[{method}] {_qualname(leaf.handler)}"
+    if leaf.middleware:
+        mw = " > ".join(_qualname(m) for m in leaf.middleware)
+        label += f" [{mw}]"
+    return label
+
+
+def _error_annotation[T](child: Node[T], parent: Node[T]) -> str:
+    """Annotate error handler transitions from parent to child."""
+    parts: list[str] = []
+    if child.not_found_handler is not parent.not_found_handler:
+        parts.append(f"404: {_qualname(child.not_found_handler)}")
+    if child.method_not_allowed_handler is not parent.method_not_allowed_handler:
+        parts.append(f"405: {_qualname(child.method_not_allowed_handler)}")
+    if not parts:
+        return ""
+    return " (" + ", ".join(parts) + ")"
+
+
 def _merge_trees[T](tree1: Node[T], tree2: Node[T]) -> Node[T]:
     """merge tree1 and tree2, error on conflict"""
     if (
