@@ -1,12 +1,13 @@
-"""OpenTelemetry tracing middleware.
+"""OpenTelemetry tracing and metrics middleware.
 
-Creates HTTP server spans with semantic conventions for each request.
+Creates HTTP server spans and metrics with semantic conventions for each request.
 
 Install with: uv add "muxy[otel]"
 """
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING, cast, overload
 
 if TYPE_CHECKING:
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
     )
 
 try:
-    from opentelemetry import trace
+    from opentelemetry import metrics, trace
     from opentelemetry.propagate import extract
     from opentelemetry.trace import (
         SpanKind,
@@ -99,36 +100,79 @@ class _TracingHTTPProtocol:
         return self._proto.response_stream(status, headers)
 
 
+_DURATION_BUCKETS = (
+    0.001,
+    0.005,
+    0.01,
+    0.025,
+    0.05,
+    0.075,
+    0.1,
+    0.25,
+    0.5,
+    0.75,
+    1.0,
+    2.5,
+    5.0,
+    7.5,
+    10.0,
+)
+
+
 def otel(
     *,
     tracer_provider: TracerProvider | None = None,
+    meter_provider: metrics.MeterProvider | None = None,
 ) -> Callable[[RSGIHandler], RSGIHandler]:
-    """Create OpenTelemetry tracing middleware.
+    """Create OpenTelemetry tracing and metrics middleware.
 
-    Creates server spans with HTTP semantic conventions for each HTTP request.
-    Websocket requests pass through without tracing.
+    Creates server spans and metrics with HTTP semantic conventions for each
+    HTTP request. Websocket requests pass through without instrumentation.
 
     Extracts trace context from incoming request headers (e.g. ``traceparent``)
     for distributed tracing. Only depends on ``opentelemetry-api``; users bring
     their own SDK and exporters.
 
+    Metrics emitted:
+        - ``http.server.request.duration`` (histogram, seconds)
+        - ``http.server.active_requests`` (up-down counter)
+
     Args:
         tracer_provider: Optional TracerProvider. If None, uses the global provider.
+        meter_provider: Optional MeterProvider. If None, uses the global provider.
 
     Returns:
-        Middleware function that wraps handlers with tracing.
+        Middleware function that wraps handlers with tracing and metrics.
 
     Example:
         router.use(otel())
 
-        # With a custom provider
+        # With custom providers
         from opentelemetry.sdk.trace import TracerProvider
-        provider = TracerProvider()
-        router.use(otel(tracer_provider=provider))
+        from opentelemetry.sdk.metrics import MeterProvider
+        router.use(otel(
+            tracer_provider=TracerProvider(),
+            meter_provider=MeterProvider(),
+        ))
     """
     tracer = trace.get_tracer(
         "muxy",
         tracer_provider=tracer_provider,
+    )
+    meter = metrics.get_meter(
+        "muxy",
+        meter_provider=meter_provider,
+    )
+    duration_histogram = meter.create_histogram(
+        "http.server.request.duration",
+        unit="s",
+        description="Duration of HTTP server requests.",
+        explicit_bucket_boundaries_advisory=_DURATION_BUCKETS,
+    )
+    active_requests_counter = meter.create_up_down_counter(
+        "http.server.active_requests",
+        unit="{request}",
+        description="Number of active HTTP server requests.",
     )
 
     def middleware(handler: RSGIHandler) -> RSGIHandler:
@@ -186,6 +230,17 @@ def otel(
             for key, value in params.items():
                 attributes[f"http.route.param.{key}"] = value
 
+            # Metric attributes (required + conditionally required per spec)
+            active_attrs: dict[str, str | int] = {
+                "http.request.method": method,
+                "url.scheme": scope.scheme,
+            }
+            if route:
+                active_attrs["http.route"] = route
+
+            active_requests_counter.add(1, active_attrs)
+            start = time.perf_counter()
+
             with tracer.start_as_current_span(
                 span_name,
                 context=ctx,
@@ -198,15 +253,22 @@ def otel(
                 try:
                     await handler(scope, wrapped_proto)
                 finally:
+                    duration = time.perf_counter() - start
+                    active_requests_counter.add(-1, active_attrs)
+                    duration_attrs = dict(active_attrs)
                     if wrapped_proto._status is not None:
                         span.set_attribute(
                             "http.response.status_code",
                             wrapped_proto._status,
                         )
+                        duration_attrs["http.response.status_code"] = (
+                            wrapped_proto._status
+                        )
                         if not route:
                             span.update_name(f"{method} {wrapped_proto._status}")
                         if wrapped_proto._status >= 500:
                             span.set_status(StatusCode.ERROR)
+                    duration_histogram.record(duration, duration_attrs)
 
         return traced_handler
 

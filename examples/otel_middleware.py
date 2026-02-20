@@ -10,10 +10,10 @@
 # [tool.uv.sources]
 # muxy = { path = "../", editable = true }
 # ///
-"""RSGI OpenTelemetry tracing middleware demo.
+"""RSGI OpenTelemetry tracing and metrics middleware demo.
 
-Shows usage of otel middleware with an in-memory exporter so traces can be
-printed to the console without needing an external collector.
+Shows usage of otel middleware with in-memory exporters so traces and metrics
+can be printed to the console without needing an external collector.
 """
 
 import asyncio
@@ -22,6 +22,8 @@ import sys
 
 import httpx
 import uvloop
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -53,11 +55,14 @@ async def not_allowed(scope: HTTPScope, proto: HTTPProtocol) -> None:
 
 
 # --- app setup ---
-exporter = InMemorySpanExporter()
-provider = TracerProvider()
-provider.add_span_processor(SimpleSpanProcessor(exporter))
+span_exporter = InMemorySpanExporter()
+trace_provider = TracerProvider()
+trace_provider.add_span_processor(SimpleSpanProcessor(span_exporter))
 
-trace_middleware = otel(tracer_provider=provider)
+metric_reader = InMemoryMetricReader()
+meter_provider = MeterProvider(metric_readers=[metric_reader])
+
+trace_middleware = otel(tracer_provider=trace_provider, meter_provider=meter_provider)
 
 router = Router()
 router.use(trace_middleware)
@@ -75,7 +80,8 @@ async def main() -> None:
     task = asyncio.create_task(serve())
     await asyncio.sleep(0.1)
     await requests()
-    provider.shutdown()
+    trace_provider.shutdown()
+    meter_provider.shutdown()
     task.cancel()
     try:
         await task
@@ -112,16 +118,31 @@ async def requests() -> None:
         print("--- DELETE / (method not allowed) ---", file=sys.stderr)
         await client.delete("/")
 
-    print("--- Collected spans ---", file=sys.stderr)
-    for span in exporter.get_finished_spans():
+    print("\n--- Spans ---", file=sys.stderr)
+    for span in span_exporter.get_finished_spans():
         attrs = span.attributes or {}
         print(
             f"  {span.name:<30} "
             f"status={attrs['http.response.status_code']:<4} "
-            f"route={attrs.get('http.route', ''):<20} "  # not set on 404/405
+            f"route={attrs.get('http.route', ''):<20} "
             f"path={attrs['url.path']}",
             file=sys.stderr,
         )
+
+    print("\n--- Metrics ---", file=sys.stderr)
+    data = metric_reader.get_metrics_data()
+    if data:
+        for resource_metric in data.resource_metrics:
+            for scope_metric in resource_metric.scope_metrics:
+                for metric in scope_metric.metrics:
+                    print(f"  {metric.name} ({metric.unit}):", file=sys.stderr)
+                    for dp in metric.data.data_points:
+                        value = (
+                            f"count={dp.count} sum={dp.sum:.4f}s"
+                            if hasattr(dp, "count")
+                            else f"value={dp.value}"
+                        )
+                        print(f"    {value}  {dict(dp.attributes)}", file=sys.stderr)
 
 
 if __name__ == "__main__":

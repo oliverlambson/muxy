@@ -1,7 +1,9 @@
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from conftest import MockHTTPProtocol, mock_scope
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -22,6 +24,16 @@ def provider(exporter: InMemorySpanExporter) -> TracerProvider:
     tp = TracerProvider()
     tp.add_span_processor(SimpleSpanProcessor(exporter))
     return tp
+
+
+@pytest.fixture
+def metric_reader() -> InMemoryMetricReader:
+    return InMemoryMetricReader()
+
+
+@pytest.fixture
+def meter_provider(metric_reader: InMemoryMetricReader) -> MeterProvider:
+    return MeterProvider(metric_readers=[metric_reader])
 
 
 # --- Basic span creation ---
@@ -367,3 +379,104 @@ async def test_custom_tracer_provider() -> None:
     spans = exporter.get_finished_spans()
     assert len(spans) == 1
     assert spans[0].name == "GET /"
+
+
+# --- Metrics ---
+
+
+def _get_metric(metric_reader: InMemoryMetricReader, name: str) -> Any:
+    """Extract a metric by name from the reader."""
+    data = metric_reader.get_metrics_data()
+    assert data is not None
+    for resource_metric in data.resource_metrics:
+        for scope_metric in resource_metric.scope_metrics:
+            for metric in scope_metric.metrics:
+                if metric.name == name:
+                    return metric
+    msg = f"Metric {name!r} not found"
+    raise AssertionError(msg)
+
+
+@pytest.mark.asyncio
+async def test_request_duration_recorded(
+    provider: TracerProvider,
+    exporter: InMemorySpanExporter,
+    meter_provider: MeterProvider,
+    metric_reader: InMemoryMetricReader,
+) -> None:
+    async def handler(scope: HTTPScope, proto: HTTPProtocol) -> None:
+        proto.response_str(200, [], "ok")
+
+    mw = otel(tracer_provider=provider, meter_provider=meter_provider)
+    wrapped = cast("RSGIHTTPHandler", mw(handler))
+
+    scope = mock_scope(path="/hello", method="GET")
+    proto = MockHTTPProtocol()
+
+    with http_route.set("/hello"):
+        await wrapped(scope, proto)
+
+    metric = _get_metric(metric_reader, "http.server.request.duration")
+    assert metric.unit == "s"
+    data_points = list(metric.data.data_points)
+    assert len(data_points) == 1
+    dp = data_points[0]
+    assert dp.sum > 0
+    assert dp.count == 1
+    assert dp.attributes["http.request.method"] == "GET"
+    assert dp.attributes["url.scheme"] == "http"
+    assert dp.attributes["http.response.status_code"] == 200
+    assert dp.attributes["http.route"] == "/hello"
+
+
+@pytest.mark.asyncio
+async def test_active_requests_incremented_and_decremented(
+    provider: TracerProvider,
+    exporter: InMemorySpanExporter,
+    meter_provider: MeterProvider,
+    metric_reader: InMemoryMetricReader,
+) -> None:
+    async def handler(scope: HTTPScope, proto: HTTPProtocol) -> None:
+        proto.response_str(200, [], "ok")
+
+    mw = otel(tracer_provider=provider, meter_provider=meter_provider)
+    wrapped = cast("RSGIHTTPHandler", mw(handler))
+
+    scope = mock_scope()
+    proto = MockHTTPProtocol()
+
+    with http_route.set("/"):
+        await wrapped(scope, proto)
+
+    # After request completes, active requests should be back to 0 (+1 then -1)
+    metric = _get_metric(metric_reader, "http.server.active_requests")
+    assert metric.unit == "{request}"
+    data_points = list(metric.data.data_points)
+    assert len(data_points) == 1
+    assert data_points[0].value == 0
+
+
+@pytest.mark.asyncio
+async def test_duration_metric_attributes_without_route(
+    provider: TracerProvider,
+    exporter: InMemorySpanExporter,
+    meter_provider: MeterProvider,
+    metric_reader: InMemoryMetricReader,
+) -> None:
+    async def handler(scope: HTTPScope, proto: HTTPProtocol) -> None:
+        proto.response_str(404, [], "not found")
+
+    mw = otel(tracer_provider=provider, meter_provider=meter_provider)
+    wrapped = cast("RSGIHTTPHandler", mw(handler))
+
+    scope = mock_scope(path="/missing", method="GET")
+    proto = MockHTTPProtocol()
+
+    with http_route.set(""):
+        await wrapped(scope, proto)
+
+    metric = _get_metric(metric_reader, "http.server.request.duration")
+    dp = next(iter(metric.data.data_points))
+    assert dp.attributes["http.request.method"] == "GET"
+    assert dp.attributes["http.response.status_code"] == 404
+    assert "http.route" not in dp.attributes
