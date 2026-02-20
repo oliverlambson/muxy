@@ -11,6 +11,7 @@ from functools import lru_cache
 from typing import Literal, Never
 
 path_params: ContextVar[dict[str, str]] = ContextVar("path_params")
+http_route: ContextVar[str] = ContextVar("http_route")
 
 type Middleware[T] = Callable[[T], T]
 type HTTPMethod = Literal[
@@ -119,36 +120,43 @@ def find_handler[T](
     path: str,
     method: LeafKey,
     tree: Node[T],
-) -> tuple[T, tuple[Middleware[T], ...], dict[str, str]]:
+) -> tuple[T, tuple[Middleware[T], ...], dict[str, str], str]:
     """Traverses the tree to find the best match handler.
 
     Each path segment priority is: exact match > wildcard match  > catchall match
     If no matching node is found for the path, return not found handler
     If matching node for path does not support method, return method not supported handler
+
+    Returns (handler, middleware, params, route_pattern) where route_pattern
+    is the matched route (e.g. "/user/{id}") or "" for error handlers.
     """
     segments = path[1:].split("/")  # assumes leading "/"
 
     current = tree
     child = None
     params = {}
+    route_parts: list[str] = []
     for i, seg in enumerate(segments):
         child = current.children.get(seg)
         if child is not None:  # exact match
+            route_parts.append(seg)
             current = child  # traverse to child
             continue
         if current.wildcard is not None:  # fallback to wildcard match
             params[current.wildcard.name] = seg
+            route_parts.append("{" + current.wildcard.name + "}")
             current = current.wildcard.child  # traverse to wildcard child
             continue
         if current.catchall is not None:  # fallback to catchall match
             params[current.catchall.name] = "/".join(segments[i:])
+            route_parts.append("{" + current.catchall.name + "...}")
             current = current.catchall.child  # traverse to catchall child
             break
         # no match
         if current.not_found_handler is None:
             msg = "No not found handler set"
             raise ValueError(msg)
-        return current.not_found_handler, (), {}
+        return current.not_found_handler, (), {}, ""
 
     leaf = current.children.get(method)
     if leaf is None:
@@ -158,19 +166,19 @@ def find_handler[T](
                 if current.method_not_allowed_handler is None:
                     msg = "No method not allowed handler set"
                     raise ValueError(msg)
-                return current.method_not_allowed_handler, (), params
+                return current.method_not_allowed_handler, (), params, ""
             if current.not_found_handler is None:
                 msg = "No not found handler set"
                 raise ValueError(msg)
-            return current.not_found_handler, (), {}
+            return current.not_found_handler, (), {}, ""
 
     if leaf.handler is None:
         if current.not_found_handler is None:
             msg = "No not found handler set"
             raise ValueError(msg)
-        return current.not_found_handler, (), {}
+        return current.not_found_handler, (), {}, ""
 
-    return leaf.handler, leaf.middleware, params
+    return leaf.handler, leaf.middleware, params, "/" + "/".join(route_parts)
 
 
 def add_route[T](

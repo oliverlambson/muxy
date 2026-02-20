@@ -89,7 +89,9 @@ class MockHTTPProtocol:
         start: int,
         end: int,
     ) -> None:
-        raise NotImplementedError
+        self.response_status = status
+        self.response_headers = headers
+        self.response_file_path = file
 
     def response_stream(
         self, status: int, headers: list[tuple[str, str]]

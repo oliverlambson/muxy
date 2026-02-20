@@ -24,6 +24,7 @@ from .tree import (
     add_route,
     finalize_tree,
     find_handler,
+    http_route,
     mount_tree,
     path_params,
 )
@@ -62,13 +63,13 @@ class Router:
     async def __rsgi__(
         self, scope: Scope, proto: HTTPProtocol | WebsocketProtocol
     ) -> None:
-        handler, params = self._handler(
+        handler, params, route = self._handler(
             LeafKey(scope.method.upper())
             if scope.proto == "http"
             else LeafKey.WEBSOCKET,
             scope.path,
         )
-        with path_params.set(params):
+        with path_params.set(params), http_route.set(route):
             await handler(scope, proto)  # ty: ignore[invalid-argument-type]  -- handler will be correct type for scope.proto
 
     @overload
@@ -87,19 +88,19 @@ class Router:
             LeafKey.ANY_HTTP,
         ],
         path: str,
-    ) -> tuple[RSGIHTTPHandler, dict[str, str]]: ...
+    ) -> tuple[RSGIHTTPHandler, dict[str, str], str]: ...
     @overload
     def _handler(
         self, method: Literal[LeafKey.WEBSOCKET], path: str
-    ) -> tuple[RSGIWebsocketHandler, dict[str, str]]: ...
+    ) -> tuple[RSGIWebsocketHandler, dict[str, str], str]: ...
     def _handler(
         self, method: LeafKey, path: str
-    ) -> tuple[RSGIHandler, dict[str, str]]:
+    ) -> tuple[RSGIHandler, dict[str, str], str]:
         """Returns the handler to use for the request."""
         # path is unescaped by the rsgi server, so we don't need to use urllib.parse.(un)quote
-        handler, middleware, params = find_handler(path, method, self._tree)
+        handler, middleware, params, route = find_handler(path, method, self._tree)
         wrapped_handler = reduce(lambda h, m: m(h), reversed(middleware), handler)
-        return wrapped_handler, params
+        return wrapped_handler, params, route
 
     def handle(
         self,

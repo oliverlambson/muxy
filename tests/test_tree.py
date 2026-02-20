@@ -541,20 +541,20 @@ finalized_tree = Node(
 
 
 @pytest.mark.parametrize(
-    "path, method, expected_handler, expected_middleware, expected_params",
+    "path, method, expected_handler, expected_middleware, expected_params, expected_route",
     [
         # simple, any method
-        ("/", LeafKey.PATCH, home_handler, (), {}),
+        ("/", LeafKey.PATCH, home_handler, (), {}, "/"),
         # simple, with method
-        ("/admin", LeafKey.GET, admin_home_handler, (admin_middleware,), {}),
+        ("/admin", LeafKey.GET, admin_home_handler, (admin_middleware,), {}, "/admin"),
         # 404
-        ("/some/nonexistent/route", LeafKey.GET, not_found_handler, (), {}),
+        ("/some/nonexistent/route", LeafKey.GET, not_found_handler, (), {}, ""),
         # 404 on trailing slash
-        ("/admin/", LeafKey.GET, admin_not_found_handler, (), {}),
+        ("/admin/", LeafKey.GET, admin_not_found_handler, (), {}, ""),
         # 404 on route with no handlers
-        ("/admin/user/", LeafKey.GET, admin_not_found_handler, (), {}),
+        ("/admin/user/", LeafKey.GET, admin_not_found_handler, (), {}, ""),
         # 405
-        ("/admin", LeafKey.DELETE, method_not_allowed_handler, (), {}),
+        ("/admin", LeafKey.DELETE, method_not_allowed_handler, (), {}, ""),
         # 405
         (
             "/static/bleugh.txt",
@@ -562,6 +562,7 @@ finalized_tree = Node(
             static_method_not_allowed_handler,
             (),
             {"path": "bleugh.txt"},
+            "",
         ),
         # wildcard param
         (
@@ -570,6 +571,7 @@ finalized_tree = Node(
             admin_user_rename_handler,
             (admin_middleware, admin_user_middleware, admin_user_rename_middleware),
             {"id": "1"},
+            "/admin/user/{id}/rename",
         ),
         (
             "/admin/user/1/rename",
@@ -577,6 +579,7 @@ finalized_tree = Node(
             admin_user_rename_handler,
             (admin_middleware, admin_user_middleware, admin_user_rename_middleware),
             {"id": "1"},
+            "/admin/user/{id}/rename",
         ),
         # multiple wildcard params
         (
@@ -585,6 +588,7 @@ finalized_tree = Node(
             admin_user_transaction_view_handler,
             (admin_middleware, admin_user_middleware),
             {"id": "1", "tx": "2"},
+            "/admin/user/{id}/transaction/{tx}",
         ),
         # catchall param
         (
@@ -593,6 +597,7 @@ finalized_tree = Node(
             static_handler,
             (),
             {"path": "lib/datastar.min.js"},
+            "/static/{path...}",
         ),
     ],
 )
@@ -602,11 +607,13 @@ def test_find_handler(
     expected_handler: Callable[[], None],
     expected_middleware: tuple[Callable[[Callable[[], None]], Callable[[], None]], ...],
     expected_params: dict[str, str],
+    expected_route: str,
 ) -> None:
-    handler, middleware, params = find_handler(path, method, finalized_tree)
+    handler, middleware, params, route = find_handler(path, method, finalized_tree)
     assert handler is expected_handler
     assert middleware == expected_middleware
     assert params == expected_params
+    assert route == expected_route
 
 
 def test_format_routes() -> None:

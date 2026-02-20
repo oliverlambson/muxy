@@ -13,6 +13,7 @@ from muxy.tree import (
     add_route,
     finalize_tree,
     find_handler,
+    http_route,
     mount_tree,
     path_params,
 )
@@ -81,13 +82,13 @@ class Router:
         if scope["type"] == "lifespan":
             await self._handle_lifespan(receive, send)  # ty: ignore[invalid-argument-type]
         else:
-            handler, params = self._handler(
+            handler, params, route = self._handler(
                 LeafKey(scope["method"].upper())
                 if scope["type"] == "http"
                 else LeafKey.WEBSOCKET,
                 scope.get("path", ""),
             )
-            with path_params.set(params):
+            with path_params.set(params), http_route.set(route):
                 await handler(scope, receive, send)  # ty: ignore[invalid-argument-type]  - is correct just want to avoid casting
 
     async def _handle_lifespan(
@@ -156,19 +157,19 @@ class Router:
             LeafKey.ANY_HTTP,
         ],
         path: str,
-    ) -> tuple[ASGIHTTPHandler, dict[str, str]]: ...
+    ) -> tuple[ASGIHTTPHandler, dict[str, str], str]: ...
     @overload
     def _handler(
         self, method: Literal[LeafKey.WEBSOCKET], path: str
-    ) -> tuple[ASGIWebsocketHandler, dict[str, str]]: ...
+    ) -> tuple[ASGIWebsocketHandler, dict[str, str], str]: ...
     def _handler(
         self, method: LeafKey, path: str
-    ) -> tuple[ASGIHandler, dict[str, str]]:
+    ) -> tuple[ASGIHandler, dict[str, str], str]:
         """Returns the handler to use for the request."""
         # path is unescaped by the rsgi server, so we don't need to use urllib.parse.(un)quote
-        handler, middleware, params = find_handler(path, method, self._tree)
+        handler, middleware, params, route = find_handler(path, method, self._tree)
         wrapped_handler = reduce(lambda h, m: m(h), reversed(middleware), handler)
-        return wrapped_handler, params
+        return wrapped_handler, params, route
 
     def handle(
         self,

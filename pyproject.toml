@@ -1,6 +1,6 @@
 [project]
 name = "muxy"
-version = "0.1.0a17"
+version = "0.1.0a18"
 description = "Lightweight router for building HTTP services."
 readme = "README.md"
 license = "MIT"
@@ -37,14 +37,19 @@ Changelog = "https://github.com/oliverlambson/muxy/blob/main/CHANGELOG.md"
 [project.optional-dependencies]
 all = [
     "muxy[compress]",
+    "muxy[otel]",
 ]
 compress = [
     "cramjam>=2.11.0,<3.0.0",
+]
+otel = [
+    "opentelemetry-api>=1.39.1,<2.0.0",
 ]
 
 [dependency-groups]
 dev = [
     "muxy[all]",
+    "opentelemetry-sdk>=1.39.1,<2.0.0",
     "pytest>=9.0.2,<10.0.0",
     "pytest-asyncio>=1.3.0,<2.0.0",
     "pytest-cov>=7.0.0,<8.0.0",
