@@ -7,6 +7,7 @@ Install with: uv add "muxy[compress]"
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Protocol, cast, overload
 
 if TYPE_CHECKING:
@@ -249,6 +250,8 @@ class _CompressingHTTPStreamTransport:
 
     async def send_bytes(self, data: bytes) -> None:
         """Compress and send bytes."""
+        if self._finished:
+            return
         self._compressor.compress(data)
         compressed = bytes(self._compressor.flush())
         if compressed:
@@ -300,6 +303,7 @@ class _CompressingHTTPProtocol:
     __slots__ = (
         "_compress",
         "_compressible_types",
+        "_disconnect_watcher",
         "_encoding",
         "_min_size",
         "_proto",
@@ -323,6 +327,7 @@ class _CompressingHTTPProtocol:
         self._compressible_types = compressible_types
         self._min_size = min_size
         self._stream: _CompressingHTTPStreamTransport | None = None
+        self._disconnect_watcher: asyncio.Task[None] | None = None
 
     async def __call__(self) -> bytes:
         """Read whole body."""
@@ -439,10 +444,19 @@ class _CompressingHTTPProtocol:
         transport = self._proto.response_stream(status, new_headers)
         compressor = self._streaming_factory()
         self._stream = _CompressingHTTPStreamTransport(transport, compressor)
+        self._disconnect_watcher = asyncio.create_task(self._watch_disconnect())
         return self._stream
+
+    async def _watch_disconnect(self) -> None:
+        """Watch for client disconnect and mark stream as finished."""
+        await self._proto.client_disconnect()
+        if self._stream is not None:
+            self._stream._finished = True
 
     async def _finalize(self) -> None:
         """Finalize any open stream. Called by middleware after inner handler returns."""
+        if self._disconnect_watcher is not None:
+            self._disconnect_watcher.cancel()
         if self._stream is not None:
             await self._stream._finish()
 
@@ -530,8 +544,10 @@ def compress(
                 compressible_types,
                 min_size,
             )
-            await handler(scope, wrapped_proto)
-            await wrapped_proto._finalize()
+            try:
+                await handler(scope, wrapped_proto)
+            finally:
+                await wrapped_proto._finalize()
 
         return compressed_handler
 
