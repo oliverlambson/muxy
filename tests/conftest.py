@@ -106,5 +106,9 @@ def mock_scope(
     path: str = "/",
     method: str = "GET",
     headers: dict[str, str] | None = None,
+    client: str = "127.0.0.1",
+    scheme: str = "http",
 ) -> HTTPScope:
-    return MockHTTPScope(path=path, method=method, headers=headers or {})
+    return MockHTTPScope(
+        path=path, method=method, headers=headers or {}, client=client, scheme=scheme
+    )
