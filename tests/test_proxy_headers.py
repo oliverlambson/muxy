@@ -44,16 +44,30 @@ def test_trusted_proxies_must_not_be_empty() -> None:
 async def test_untrusted_proxy_passthrough() -> None:
     handler = _make_middleware(trusted_proxies=frozenset({"10.0.0.1"}))
     scope = mock_scope(
-        client="192.168.1.1",
+        client="192.168.1.1:54321",
         headers={"x-forwarded-for": "1.2.3.4", "x-forwarded-proto": "https"},
     )
     proto = MockHTTPProtocol()
     await handler(scope, proto)
-    assert proto.response_body == b"client=192.168.1.1 scheme=http"
+    assert proto.response_body == b"client=192.168.1.1:54321 scheme=http"
 
 
 @pytest.mark.asyncio
 async def test_trusted_proxy_overrides() -> None:
+    """Trusted proxy check matches IP even when scope.client includes port."""
+    handler = _make_middleware(trusted_proxies=frozenset({"10.0.0.1"}))
+    scope = mock_scope(
+        client="10.0.0.1:12345",
+        headers={"x-forwarded-for": "1.2.3.4", "x-forwarded-proto": "https"},
+    )
+    proto = MockHTTPProtocol()
+    await handler(scope, proto)
+    assert proto.response_body == b"client=1.2.3.4 scheme=https"
+
+
+@pytest.mark.asyncio
+async def test_trusted_proxy_bare_ip() -> None:
+    """Trusted proxy check also works with bare IP (no port)."""
     handler = _make_middleware(trusted_proxies=frozenset({"10.0.0.1"}))
     scope = mock_scope(
         client="10.0.0.1",
@@ -68,7 +82,7 @@ async def test_trusted_proxy_overrides() -> None:
 async def test_wildcard_trusts_all() -> None:
     handler = _make_middleware(trusted_proxies=frozenset({"*"}))
     scope = mock_scope(
-        client="anything",
+        client="anything:9999",
         headers={"x-forwarded-for": "1.2.3.4", "x-forwarded-proto": "https"},
     )
     proto = MockHTTPProtocol()
@@ -130,10 +144,10 @@ async def test_xff_whitespace_stripped() -> None:
 @pytest.mark.asyncio
 async def test_xff_empty_passthrough() -> None:
     handler = _make_middleware()
-    scope = mock_scope(client="10.0.0.1", headers={"x-forwarded-for": ""})
+    scope = mock_scope(client="10.0.0.1:9999", headers={"x-forwarded-for": ""})
     proto = MockHTTPProtocol()
     await handler(scope, proto)
-    # Empty XFF → keep original client
+    # Empty XFF → keep original client IP (port stripped)
     assert proto.response_body == b"client=10.0.0.1 scheme=http"
 
 
@@ -150,9 +164,10 @@ async def test_xfp_https() -> None:
 @pytest.mark.asyncio
 async def test_xfp_only_no_xff() -> None:
     handler = _make_middleware()
-    scope = mock_scope(client="10.0.0.1", headers={"x-forwarded-proto": "https"})
+    scope = mock_scope(client="10.0.0.1:9999", headers={"x-forwarded-proto": "https"})
     proto = MockHTTPProtocol()
     await handler(scope, proto)
+    # No XFF → client IP from scope (port stripped)
     assert proto.response_body == b"client=10.0.0.1 scheme=https"
 
 

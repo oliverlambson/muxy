@@ -121,8 +121,13 @@ def proxy_headers(
         ) -> None:
             nonlocal handler
 
+            # Extract IP from "ip:port" or bare "ip" — computed once per request
+            raw_client = scope.client
+            host, _, port = raw_client.rpartition(":")
+            client_ip = host if host and port.isdigit() else raw_client
+
             # Fast path: untrusted proxy, passthrough with zero overhead
-            if not (trust_all or scope.client in trusted_proxies):
+            if not (trust_all or client_ip in trusted_proxies):
                 if scope.proto == "http":
                     handler = cast("RSGIHTTPHandler", handler)
                     scope = cast("HTTPScope", scope)
@@ -154,7 +159,7 @@ def proxy_headers(
                 return
 
             # Parse X-Forwarded-For
-            client = scope.client
+            client = client_ip
             if xff is not None:
                 # rsplit with maxsplit avoids splitting the full string
                 parts = xff.rsplit(",", maxsplit=num_proxies)
