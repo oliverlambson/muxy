@@ -267,6 +267,7 @@ class _CompressingHTTPStreamTransport:
             return
         self._finished = True
         final = bytes(self._compressor.finish())
+        del self._compressor  # wrapped proto doesn't get freed for some reason
         if final:
             try:
                 await self._transport.send_bytes(final)
