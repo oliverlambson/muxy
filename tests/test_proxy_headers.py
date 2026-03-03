@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import cast
+from typing import ClassVar, cast
 
 import pytest
 from conftest import MockHTTPProtocol, mock_scope
@@ -268,7 +268,7 @@ async def test_websocket_scheme_mapped_https_to_wss() -> None:
         method = "GET"
         path = "/"
         query_string = ""
-        headers: dict[str, str] = {
+        headers: ClassVar[dict[str, str]] = {
             "x-forwarded-for": "1.2.3.4",
             "x-forwarded-proto": "https",
         }
@@ -300,7 +300,7 @@ async def test_websocket_scheme_mapped_http_to_ws() -> None:
         method = "GET"
         path = "/"
         query_string = ""
-        headers: dict[str, str] = {"x-forwarded-proto": "http"}
+        headers: ClassVar[dict[str, str]] = {"x-forwarded-proto": "http"}
         authority = None
 
     mw = proxy_headers(trusted_proxies=frozenset({"*"}))
