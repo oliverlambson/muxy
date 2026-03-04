@@ -458,6 +458,7 @@ class _CompressingHTTPProtocol:
         """Finalize any open stream. Called by middleware after inner handler returns."""
         if self._disconnect_watcher is not None:
             self._disconnect_watcher.cancel()
+            await asyncio.gather(self._disconnect_watcher, return_exceptions=True)
         if self._stream is not None:
             await self._stream._finish()
 
