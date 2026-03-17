@@ -90,6 +90,102 @@ async def test_wildcard_trusts_all() -> None:
     assert proto.response_body == b"client=1.2.3.4 scheme=https"
 
 
+# --- IPv6 support -----------------------------------------------------------
+@pytest.mark.asyncio
+async def test_ipv6_bracketed_with_port_trusted() -> None:
+    """Bracketed IPv6 [::1]:port is parsed correctly for trust check."""
+    handler = _make_middleware(trusted_proxies=frozenset({"::1"}))
+    scope = mock_scope(
+        client="[::1]:54321",
+        headers={"x-forwarded-for": "1.2.3.4", "x-forwarded-proto": "https"},
+    )
+    proto = MockHTTPProtocol()
+    await handler(scope, proto)
+    assert proto.response_body == b"client=1.2.3.4 scheme=https"
+
+
+@pytest.mark.asyncio
+async def test_ipv6_bare_trusted() -> None:
+    """Bare IPv6 address (no port) is parsed correctly for trust check."""
+    handler = _make_middleware(trusted_proxies=frozenset({"::1"}))
+    scope = mock_scope(
+        client="::1",
+        headers={"x-forwarded-for": "1.2.3.4", "x-forwarded-proto": "https"},
+    )
+    proto = MockHTTPProtocol()
+    await handler(scope, proto)
+    assert proto.response_body == b"client=1.2.3.4 scheme=https"
+
+
+@pytest.mark.asyncio
+async def test_ipv6_full_address_trusted() -> None:
+    """Full IPv6 address like 2001:db8::1 is parsed correctly."""
+    handler = _make_middleware(trusted_proxies=frozenset({"2001:db8::1"}))
+    scope = mock_scope(
+        client="2001:db8::1",
+        headers={"x-forwarded-for": "1.2.3.4"},
+    )
+    proto = MockHTTPProtocol()
+    await handler(scope, proto)
+    assert proto.response_body == b"client=1.2.3.4 scheme=http"
+
+
+@pytest.mark.asyncio
+async def test_ipv6_bracketed_full_address_trusted() -> None:
+    """Bracketed full IPv6 [2001:db8::1]:port is parsed correctly."""
+    handler = _make_middleware(trusted_proxies=frozenset({"2001:db8::1"}))
+    scope = mock_scope(
+        client="[2001:db8::1]:8080",
+        headers={"x-forwarded-for": "1.2.3.4"},
+    )
+    proto = MockHTTPProtocol()
+    await handler(scope, proto)
+    assert proto.response_body == b"client=1.2.3.4 scheme=http"
+
+
+@pytest.mark.asyncio
+async def test_ipv6_untrusted_passthrough() -> None:
+    """IPv6 proxy not in trusted set passes through unchanged."""
+    handler = _make_middleware(trusted_proxies=frozenset({"10.0.0.1"}))
+    scope = mock_scope(
+        client="[::1]:54321",
+        headers={"x-forwarded-for": "1.2.3.4"},
+    )
+    proto = MockHTTPProtocol()
+    await handler(scope, proto)
+    assert proto.response_body == b"client=[::1]:54321 scheme=http"
+
+
+@pytest.mark.asyncio
+async def test_ipv6_no_proxy_headers_passthrough() -> None:
+    """IPv6 client with no proxy headers passes through unchanged."""
+    handler = _make_middleware()
+    scope = mock_scope(client="[::1]:54321")
+    proto = MockHTTPProtocol()
+    await handler(scope, proto)
+    assert proto.response_body == b"client=[::1]:54321 scheme=http"
+
+
+@pytest.mark.asyncio
+async def test_xff_contains_ipv6() -> None:
+    """X-Forwarded-For with IPv6 addresses is parsed correctly."""
+    handler = _make_middleware(num_proxies=1)
+    scope = mock_scope(headers={"x-forwarded-for": "2001:db8::1, 10.0.0.1"})
+    proto = MockHTTPProtocol()
+    await handler(scope, proto)
+    assert proto.response_body == b"client=10.0.0.1 scheme=http"
+
+
+@pytest.mark.asyncio
+async def test_xff_single_ipv6() -> None:
+    """X-Forwarded-For with a single IPv6 address."""
+    handler = _make_middleware(num_proxies=1)
+    scope = mock_scope(headers={"x-forwarded-for": "2001:db8::1"})
+    proto = MockHTTPProtocol()
+    await handler(scope, proto)
+    assert proto.response_body == b"client=2001:db8::1 scheme=http"
+
+
 # --- x-forwarded-for parsing ------------------------------------------------
 @pytest.mark.asyncio
 async def test_xff_single_ip() -> None:

@@ -150,7 +150,7 @@ wheels = [
 
 [[package]]
 name = "muxy"
-version = "0.1.0a25"
+version = "0.1.0a26"
 source = { editable = "." }
 
 [package.optional-dependencies]

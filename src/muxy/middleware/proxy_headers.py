@@ -123,8 +123,17 @@ def proxy_headers(
 
             # Extract IP from "ip:port" or bare "ip" — computed once per request
             raw_client = scope.client
-            host, _, port = raw_client.rpartition(":")
-            client_ip = host if host and port.isdigit() else raw_client
+            if raw_client.startswith("["):
+                # Bracketed IPv6: [::1]:port or [::1]
+                bracket_end = raw_client.index("]")
+                client_ip = raw_client[1:bracket_end]
+            elif raw_client.count(":") > 1:
+                # Bare IPv6 (no port): e.g. ::1 or 2001:db8::1
+                client_ip = raw_client
+            else:
+                # IPv4 with optional port: 1.2.3.4:8080 or 1.2.3.4
+                host, _, port = raw_client.rpartition(":")
+                client_ip = host if host and port.isdigit() else raw_client
 
             # Fast path: untrusted proxy, passthrough with zero overhead
             if not (trust_all or client_ip in trusted_proxies):

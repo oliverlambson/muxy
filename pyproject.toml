@@ -1,6 +1,6 @@
 [project]
 name = "muxy"
-version = "0.1.0a25"
+version = "0.1.0a26"
 description = "Lightweight router for building HTTP services."
 readme = "README.md"
 license = "MIT"
