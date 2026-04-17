@@ -108,7 +108,17 @@ def mock_scope(
     headers: dict[str, str] | None = None,
     client: str = "127.0.0.1",
     scheme: str = "http",
+    query_string: str = "",
+    server: str = "localhost",
+    authority: str | None = None,
 ) -> HTTPScope:
     return MockHTTPScope(
-        path=path, method=method, headers=headers or {}, client=client, scheme=scheme
+        path=path,
+        method=method,
+        headers=headers or {},
+        client=client,
+        scheme=scheme,
+        query_string=query_string,
+        server=server,
+        authority=authority,
     )

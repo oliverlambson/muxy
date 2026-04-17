@@ -310,7 +310,7 @@ async def test_xff_only_no_xfp() -> None:
 # --- scope wrapper delegation ------------------------------------------------
 @pytest.mark.asyncio
 async def test_delegated_attributes() -> None:
-    """Wrapped scope delegates non-overridden attributes to original scope."""
+    """Wrapped scope delegates original attributes and preserves the raw peer."""
 
     captured: dict[str, object] = {}
 
@@ -322,6 +322,7 @@ async def test_delegated_attributes() -> None:
         captured["http_version"] = scope.http_version
         captured["client"] = scope.client
         captured["scheme"] = scope.scheme
+        captured["network_peer"] = scope.network_peer  # type: ignore[attr-defined]
         proto.response_empty(200, [])
 
     mw = proxy_headers(trusted_proxies=frozenset({"*"}))
@@ -330,6 +331,7 @@ async def test_delegated_attributes() -> None:
     scope = mock_scope(
         path="/test",
         method="POST",
+        client="10.0.0.1:54321",
         headers={"x-forwarded-for": "1.2.3.4", "x-forwarded-proto": "https"},
     )
     proto = MockHTTPProtocol()
@@ -340,6 +342,7 @@ async def test_delegated_attributes() -> None:
     assert captured["path"] == "/test"
     assert captured["client"] == "1.2.3.4"
     assert captured["scheme"] == "https"
+    assert captured["network_peer"] == "10.0.0.1:54321"
 
 
 # --- websocket scheme mapping ------------------------------------------------

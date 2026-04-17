@@ -8,10 +8,10 @@ Install with: uv add "muxy[otel]"
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, cast, overload
+from typing import TYPE_CHECKING, Literal, cast, overload
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from muxy.rsgi import (
         HTTPProtocol,
@@ -40,6 +40,70 @@ except ImportError as e:
     raise ImportError(msg) from e
 
 from muxy.tree import http_route, path_params
+
+type _CapturedSpanAttribute = Literal["client.port"]
+type _SpanAttributeValue = str | int | tuple[str, ...]
+
+_DEFAULT_REQUEST_HEADERS = (
+    "referer",
+    "sec-fetch-site",
+    "sec-fetch-mode",
+    "sec-fetch-dest",
+)
+_SUPPORTED_CAPTURED_SPAN_ATTRIBUTES = frozenset(("client.port",))
+
+
+def _split_endpoint(value: str) -> tuple[str | None, int | None]:
+    value = value.strip()
+    if not value:
+        return None, None
+
+    if value.startswith("["):
+        bracket_end = value.find("]")
+        if bracket_end != -1:
+            host = value[1:bracket_end]
+            remainder = value[bracket_end + 1 :]
+            if remainder.startswith(":") and remainder[1:].isdigit():
+                return host or None, int(remainder[1:])
+            return host or None, None
+
+    if value.count(":") == 1:
+        host, port = value.rsplit(":", maxsplit=1)
+        if host and port.isdigit():
+            return host, int(port)
+
+    return value, None
+
+
+def _capture_request_headers(
+    headers: Mapping[str, str], header_allowlist: tuple[str, ...]
+) -> dict[str, tuple[str, ...]]:
+    attributes: dict[str, tuple[str, ...]] = {}
+    for header_name in header_allowlist:
+        header_value = headers.get(header_name)
+        if header_value:
+            attributes[f"http.request.header.{header_name}"] = (header_value,)
+    return attributes
+
+
+def _normalize_captured_span_attributes(
+    captured_span_attributes: tuple[_CapturedSpanAttribute, ...],
+) -> frozenset[_CapturedSpanAttribute]:
+    normalized = frozenset(
+        attribute.strip().lower()
+        for attribute in captured_span_attributes
+        if attribute.strip()
+    )
+    unsupported = normalized - _SUPPORTED_CAPTURED_SPAN_ATTRIBUTES
+    if unsupported:
+        unsupported_values = ", ".join(sorted(unsupported))
+        supported_values = ", ".join(sorted(_SUPPORTED_CAPTURED_SPAN_ATTRIBUTES))
+        msg = (
+            "Unsupported captured_span_attributes: "
+            f"{unsupported_values}. Supported values: {supported_values}"
+        )
+        raise ValueError(msg)
+    return cast("frozenset[_CapturedSpanAttribute]", normalized)
 
 
 class _TracingHTTPProtocol:
@@ -123,6 +187,8 @@ def otel(
     *,
     tracer_provider: TracerProvider | None = None,
     meter_provider: metrics.MeterProvider | None = None,
+    captured_request_headers: tuple[str, ...] = _DEFAULT_REQUEST_HEADERS,
+    captured_span_attributes: tuple[_CapturedSpanAttribute, ...] = (),
 ) -> Callable[[RSGIHandler], RSGIHandler]:
     """Create OpenTelemetry tracing and metrics middleware.
 
@@ -140,6 +206,12 @@ def otel(
     Args:
         tracer_provider: Optional TracerProvider. If None, uses the global provider.
         meter_provider: Optional MeterProvider. If None, uses the global provider.
+        captured_request_headers: Explicit request-header allowlist to copy onto
+            spans as ``http.request.header.<key>`` attributes. Defaults to the
+            small browser-debugging set of ``referer`` and ``sec-fetch-*``.
+            Pass ``()`` to disable request-header capture entirely.
+        captured_span_attributes: Explicit allowlist of extra span attributes to
+            capture. Supported values: ``"client.port"``. Defaults to ``()``.
 
     Returns:
         Middleware function that wraps handlers with tracing and metrics.
@@ -173,6 +245,16 @@ def otel(
         "http.server.active_requests",
         unit="{request}",
         description="Number of active HTTP server requests.",
+    )
+    header_allowlist = tuple(
+        dict.fromkeys(
+            header.strip().lower()
+            for header in captured_request_headers
+            if header.strip()
+        )
+    )
+    span_attribute_allowlist = _normalize_captured_span_attributes(
+        captured_span_attributes
     )
 
     def middleware(handler: RSGIHandler) -> RSGIHandler:
@@ -210,14 +292,28 @@ def otel(
             span_name = f"{method} {route}" if route else method
 
             # Span attributes (stable HTTP semantic conventions)
-            attributes: dict[str, str | int] = {
+            client_address, client_port = _split_endpoint(scope.client)
+            peer_source = cast("str | None", getattr(scope, "network_peer", None))
+            peer_address: str | None = None
+            peer_port: int | None = None
+            if peer_source is not None:
+                peer_address, peer_port = _split_endpoint(peer_source)
+
+            attributes: dict[str, _SpanAttributeValue] = {
                 "http.request.method": method,
                 "url.path": scope.path,
                 "url.scheme": scope.scheme,
                 "network.protocol.version": scope.http_version,
                 "server.address": scope.server,
-                "client.address": scope.client,
             }
+            if client_address is not None:
+                attributes["client.address"] = client_address
+            if "client.port" in span_attribute_allowlist and client_port is not None:
+                attributes["client.port"] = client_port
+            if peer_address is not None:
+                attributes["network.peer.address"] = peer_address
+            if peer_port is not None:
+                attributes["network.peer.port"] = peer_port
             if route:
                 attributes["http.route"] = route
             if scope.query_string:
@@ -225,6 +321,7 @@ def otel(
             user_agent = scope.headers.get("user-agent")
             if user_agent is not None:
                 attributes["user_agent.original"] = user_agent
+            attributes.update(_capture_request_headers(scope.headers, header_allowlist))
             # below isn't part of semantic conventions but having path params is useful
             params = path_params.get({})
             for key, value in params.items():
@@ -250,8 +347,13 @@ def otel(
                 set_status_on_exception=True,
             ) as span:
                 wrapped_proto = _TracingHTTPProtocol(proto)
+                error_type: str | None = None
                 try:
                     await handler(scope, wrapped_proto)
+                except Exception as exc:
+                    error_type = type(exc).__name__
+                    span.set_attribute("error.type", error_type)
+                    raise
                 finally:
                     duration = time.perf_counter() - start
                     active_requests_counter.add(-1, active_attrs)
@@ -268,6 +370,11 @@ def otel(
                             span.update_name(f"{method} {wrapped_proto._status}")
                         if wrapped_proto._status >= 500:
                             span.set_status(StatusCode.ERROR)
+                            if error_type is None:
+                                span.set_attribute(
+                                    "error.type",
+                                    str(wrapped_proto._status),
+                                )
                     duration_histogram.record(duration, duration_attrs)
 
         return traced_handler

@@ -10,6 +10,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from opentelemetry.trace import SpanKind, StatusCode
 
 from muxy.middleware.otel import otel
+from muxy.middleware.proxy_headers import proxy_headers
 from muxy.rsgi import HTTPProtocol, HTTPScope, RSGIHTTPHandler
 from muxy.tree import http_route, path_params
 
@@ -158,7 +159,10 @@ async def test_5xx_sets_error_status(
         await wrapped(scope, proto)
 
     spans = exporter.get_finished_spans()
-    assert spans[0].status.status_code == StatusCode.ERROR
+    span = spans[0]
+    assert span.status.status_code == StatusCode.ERROR
+    assert span.attributes is not None
+    assert span.attributes["error.type"] == "500"
 
 
 @pytest.mark.asyncio
@@ -202,6 +206,8 @@ async def test_exception_records_and_raises(
         await wrapped(scope, proto)
 
     spans = exporter.get_finished_spans()
+    assert spans[0].attributes is not None
+    assert spans[0].attributes["error.type"] == "RuntimeError"
     assert spans[0].status.status_code == StatusCode.ERROR
     assert len(spans[0].events) > 0
     exception_event = next(e for e in spans[0].events if e.name == "exception")
@@ -252,12 +258,12 @@ async def test_attributes_populated(
     scope = mock_scope(
         path="/search",
         method="POST",
+        client="127.0.0.1:54321",
         headers={
             "user-agent": "test-agent/1.0",
         },
+        query_string="q=hello",
     )
-    # Set query_string on the mock
-    scope.query_string = "q=hello"
     proto = MockHTTPProtocol()
 
     with http_route.set("/search"):
@@ -273,8 +279,161 @@ async def test_attributes_populated(
     assert attrs["network.protocol.version"] == "1.1"
     assert attrs["server.address"] == "localhost"
     assert attrs["client.address"] == "127.0.0.1"
+    assert "client.port" not in attrs
+    assert "network.peer.address" not in attrs
+    assert "network.peer.port" not in attrs
     assert attrs["user_agent.original"] == "test-agent/1.0"
     assert attrs["http.response.status_code"] == 204
+
+
+@pytest.mark.asyncio
+async def test_client_port_captured_when_allowlisted(
+    provider: TracerProvider, exporter: InMemorySpanExporter
+) -> None:
+    async def handler(scope: HTTPScope, proto: HTTPProtocol) -> None:
+        proto.response_empty(204, [])
+
+    mw = otel(
+        tracer_provider=provider,
+        captured_span_attributes=("client.port",),
+    )
+    wrapped = cast("RSGIHTTPHandler", mw(handler))
+
+    scope = mock_scope(client="127.0.0.1:54321")
+    proto = MockHTTPProtocol()
+
+    with http_route.set("/"):
+        await wrapped(scope, proto)
+
+    attrs = exporter.get_finished_spans()[0].attributes
+    assert attrs is not None
+    assert attrs["client.address"] == "127.0.0.1"
+    assert attrs["client.port"] == 54321
+
+
+def test_invalid_captured_span_attribute_rejected() -> None:
+    with pytest.raises(ValueError, match="Unsupported captured_span_attributes"):
+        otel(captured_span_attributes=cast("Any", ("server.port",)))
+
+
+@pytest.mark.asyncio
+async def test_default_request_header_allowlist_captured(
+    provider: TracerProvider, exporter: InMemorySpanExporter
+) -> None:
+    async def handler(scope: HTTPScope, proto: HTTPProtocol) -> None:
+        proto.response_empty(200, [])
+
+    mw = otel(tracer_provider=provider)
+    wrapped = cast("RSGIHTTPHandler", mw(handler))
+
+    scope = mock_scope(
+        headers={
+            "referer": "https://example.com/login",
+            "sec-fetch-site": "cross-site",
+            "x-forwarded-for": "203.0.113.50",
+        }
+    )
+    proto = MockHTTPProtocol()
+
+    with http_route.set("/"):
+        await wrapped(scope, proto)
+
+    attrs = exporter.get_finished_spans()[0].attributes
+    assert attrs is not None
+    assert attrs["http.request.header.referer"] == ("https://example.com/login",)
+    assert attrs["http.request.header.sec-fetch-site"] == ("cross-site",)
+    assert "http.request.header.x-forwarded-for" not in attrs
+
+
+@pytest.mark.asyncio
+async def test_custom_request_header_allowlist(
+    provider: TracerProvider, exporter: InMemorySpanExporter
+) -> None:
+    async def handler(scope: HTTPScope, proto: HTTPProtocol) -> None:
+        proto.response_empty(200, [])
+
+    mw = otel(
+        tracer_provider=provider,
+        captured_request_headers=("x-forwarded-for",),
+    )
+    wrapped = cast("RSGIHTTPHandler", mw(handler))
+
+    scope = mock_scope(
+        headers={
+            "referer": "https://example.com/login",
+            "x-forwarded-for": "203.0.113.50",
+        }
+    )
+    proto = MockHTTPProtocol()
+
+    with http_route.set("/"):
+        await wrapped(scope, proto)
+
+    attrs = exporter.get_finished_spans()[0].attributes
+    assert attrs is not None
+    assert attrs["http.request.header.x-forwarded-for"] == ("203.0.113.50",)
+    assert "http.request.header.referer" not in attrs
+
+
+@pytest.mark.asyncio
+async def test_server_address_uses_scope_server_without_server_port(
+    provider: TracerProvider, exporter: InMemorySpanExporter
+) -> None:
+    async def handler(scope: HTTPScope, proto: HTTPProtocol) -> None:
+        proto.response_empty(200, [])
+
+    mw = otel(tracer_provider=provider)
+    wrapped = cast("RSGIHTTPHandler", mw(handler))
+
+    scope = mock_scope(
+        server="localhost:8080",
+        authority="authority.example.com:7443",
+        headers={
+            "forwarded": 'for=192.0.2.60;host="api.example.com:8443";proto=https',
+            "x-forwarded-host": "proxy.example.com:9443",
+            "host": "backend.example.com:8080",
+        },
+    )
+    proto = MockHTTPProtocol()
+
+    with http_route.set("/"):
+        await wrapped(scope, proto)
+
+    attrs = exporter.get_finished_spans()[0].attributes
+    assert attrs is not None
+    assert attrs["server.address"] == "localhost:8080"
+    assert "server.port" not in attrs
+
+
+@pytest.mark.asyncio
+async def test_client_and_network_peer_attributes_with_proxy_headers(
+    provider: TracerProvider, exporter: InMemorySpanExporter
+) -> None:
+    async def handler(scope: HTTPScope, proto: HTTPProtocol) -> None:
+        proto.response_empty(200, [])
+
+    wrapped = cast(
+        "RSGIHTTPHandler",
+        proxy_headers(trusted_proxies=frozenset({"*"}))(
+            otel(tracer_provider=provider)(handler)
+        ),
+    )
+
+    scope = mock_scope(
+        client="10.0.0.1:54321",
+        headers={"x-forwarded-for": "203.0.113.50"},
+    )
+    proto = MockHTTPProtocol()
+
+    with http_route.set("/"):
+        await wrapped(scope, proto)
+
+    attrs = exporter.get_finished_spans()[0].attributes
+    assert attrs is not None
+    assert attrs["client.address"] == "203.0.113.50"
+    assert "client.port" not in attrs
+    assert attrs["network.peer.address"] == "10.0.0.1"
+    assert attrs["network.peer.port"] == 54321
 
 
 # --- All response methods capture status ---

@@ -30,28 +30,42 @@ if TYPE_CHECKING:
 
 
 class _ProxiedHTTPScope:
-    """Lightweight wrapper that overrides client/scheme on an HTTPScope."""
+    """Wrap an HTTPScope while preserving the immediate socket peer."""
 
-    __slots__ = ("_scope", "client", "scheme")
+    __slots__ = ("_scope", "client", "network_peer", "scheme")
 
-    def __init__(self, scope: HTTPScope, client: str, scheme: str) -> None:
+    def __init__(
+        self,
+        scope: HTTPScope,
+        client: str,
+        scheme: str,
+        network_peer: str,
+    ) -> None:
         self._scope = scope
         self.client = client
         self.scheme = scheme
+        self.network_peer = network_peer
 
     def __getattr__(self, name: str) -> object:
         return getattr(self._scope, name)
 
 
 class _ProxiedWebsocketScope:
-    """Lightweight wrapper that overrides client/scheme on a WebsocketScope."""
+    """Wrap a WebsocketScope while preserving the immediate socket peer."""
 
-    __slots__ = ("_scope", "client", "scheme")
+    __slots__ = ("_scope", "client", "network_peer", "scheme")
 
-    def __init__(self, scope: WebsocketScope, client: str, scheme: str) -> None:
+    def __init__(
+        self,
+        scope: WebsocketScope,
+        client: str,
+        scheme: str,
+        network_peer: str,
+    ) -> None:
         self._scope = scope
         self.client = client
         self.scheme = scheme
+        self.network_peer = network_peer
 
     def __getattr__(self, name: str) -> object:
         return getattr(self._scope, name)
@@ -71,6 +85,8 @@ def proxy_headers(
     and overrides `scope.client` and `scope.scheme` so downstream handlers
     see the real client information. Other proxy headers (`X-Forwarded-Port`,
     `X-Amzn-Trace-Id`, etc.) remain in `scope.headers` for direct access.
+    Wrapped scopes also preserve the immediate socket peer on
+    `scope.network_peer` for downstream middleware that needs both values.
 
     Args:
         trusted_proxies: Set of proxy IP addresses to trust. Use
@@ -192,7 +208,12 @@ def proxy_headers(
             if scope.proto == "http":
                 handler = cast("RSGIHTTPHandler", handler)
                 proto = cast("HTTPProtocol", proto)
-                wrapped = _ProxiedHTTPScope(cast("HTTPScope", scope), client, scheme)
+                wrapped = _ProxiedHTTPScope(
+                    cast("HTTPScope", scope),
+                    client,
+                    scheme,
+                    raw_client,
+                )
                 await handler(wrapped, proto)  # type: ignore[arg-type]
             else:
                 handler = cast("RSGIWebsocketHandler", handler)
@@ -200,7 +221,10 @@ def proxy_headers(
                 # Map HTTP scheme to WS scheme for websocket
                 ws_scheme = _WS_SCHEME_MAP.get(scheme, scheme)
                 wrapped_ws = _ProxiedWebsocketScope(
-                    cast("WebsocketScope", scope), client, ws_scheme
+                    cast("WebsocketScope", scope),
+                    client,
+                    ws_scheme,
+                    raw_client,
                 )
                 await handler(wrapped_ws, proto)  # type: ignore[arg-type]
 
